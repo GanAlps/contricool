@@ -7,7 +7,7 @@ CDK app in Python that defines all ContriCool AWS resources.
 | Stack | Scope | What it holds |
 |---|---|---|
 | `Contricool-Shared` | account-wide | GitHub OIDC provider; `Contricool-CI-Dev-Deploy` / `Contricool-CI-Prod-Deploy` / `Contricool-CI-PR-ReadOnly` IAM roles; AWS Budgets ($20/$30 on `app=contricool` tag); CloudTrail multi-region trail + S3 audit bucket; SNS alerts topic; project KMS CMK |
-| `Contricool-{Dev,Prod}-Api` | per env | Lambda DockerImageFunction (arm64, SnapStart-on-published-versions, reserved concurrency 100); API Gateway HTTP API with catch-all `/{proxy+}` routing to Lambda; permissive CORS (strict origin allowlist enforced at CloudFront) |
+| `Contricool-{Dev,Prod}-Api` | per env | Lambda DockerImageFunction (arm64, reserved concurrency `5` dev / `100` prod — see `app.py` `ENV_CONFIGS`); SnapStart wired but disabled at MVP (AWS does not support SnapStart on container-image Lambdas); API Gateway HTTP API with catch-all `/{proxy+}` routing to Lambda; permissive CORS (strict origin allowlist enforced at CloudFront) |
 | `Contricool-{Dev,Prod}-Web` | per env | Private S3 bucket + CloudFront distribution with two origins (`/v1/*`, `/api/*` → API Gateway; default → S3 with SPA-fallback CloudFront Function); security response headers policy. Originally split into separate `Web` and `Edge` stacks per Design 3, but combined here to avoid the CDK auto-bucket-policy stack-cycle that arises when CloudFront's OAC bucket policy lives in a different stack from the bucket. |
 | `Contricool-{Dev,Prod}-Monitoring` | per env | CloudWatch alarms (Lambda errors, API Gateway 5xx) + (prod-only) dashboard |
 

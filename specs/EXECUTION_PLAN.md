@@ -24,7 +24,7 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 
 ---
 
-## Phase 0 — Repo Bootstrap & Safety Nets
+## Phase 0 — Repo Bootstrap & Safety Nets ✅ COMPLETE
 
 **Goal**: an empty repo on GitHub with every safety net (red-line enforcement) wired up before the first line of feature code is written.
 
@@ -32,32 +32,32 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 
 ### Tasks
 
-- [ ] Initialize git repo locally; `gh repo create contricool --public`.
-- [ ] Add `.gitignore` covering: `*.env*`, `.venv/`, `node_modules/`, `dist/`, `build/`, `cdk.out/`, `cdk.context.json`, `*.pem`, `*.key`, `secrets/`, `.DS_Store`, `__pycache__/`, `.pytest_cache/`, `coverage/`.
-- [ ] Add `.gitleaks.toml` with project-specific deny rules:
+- [x] Initialize git repo locally; `gh repo create contricool --public`.
+- [x] Add `.gitignore` covering: `*.env*`, `.venv/`, `node_modules/`, `dist/`, `build/`, `cdk.out/`, `cdk.context.json`, `*.pem`, `*.key`, `secrets/`, `.DS_Store`, `__pycache__/`, `.pytest_cache/`, `coverage/`.
+- [x] Add `.gitleaks.toml` with project-specific deny rules:
   - AWS access key patterns (`AKIA[0-9A-Z]{16}`).
   - JWT shape detection.
   - Custom regex blocking `*.cloudfront.net`, `*.execute-api.*.amazonaws.com`, `*.cognito-idp.*.amazonaws.com`, raw 12-digit AWS account numbers.
-- [ ] Add `lefthook.yml` pre-commit hooks: `ruff check --fix` (Python staged), `mypy` (Python), `biome check --apply` (TS staged), `gitleaks detect --staged`, `make openapi-check` (if API touched).
-- [ ] Add root `package.json` + `pnpm-workspace.yaml` declaring workspaces `apps/*` and `packages/*`.
-- [ ] Add `Makefile` with stub targets: `dev-up`, `api-test`, `client-test`, `infra-diff`, `infra-deploy-dev`, `openapi`, `openapi-check`, `lint`, `format`.
-- [ ] Create skeleton folders with `.gitkeep`: `apps/api/`, `apps/client/`, `apps/infra/`, `packages/openapi/`, `packages/client-sdk/`, `specs/runbooks/`.
-- [ ] Add root `README.md` with: project blurb, prerequisites (Python 3.12, Node 22, pnpm 9, AWS CLI, CDK), quick-start commands, link to `CLAUDE.md`.
-- [ ] Push initial commit to `main`.
+- [x] Add `lefthook.yml` pre-commit hooks: `ruff check --fix` (Python staged), `mypy` (Python), `biome check --apply` (TS staged), `gitleaks detect --staged`, `make openapi-check` (if API touched).
+- [x] Add root `package.json` + `pnpm-workspace.yaml` declaring workspaces `apps/*` and `packages/*`.
+- [x] Add `Makefile` with stub targets: `dev-up`, `api-test`, `client-test`, `infra-diff`, `infra-deploy-dev`, `openapi`, `openapi-check`, `lint`, `format`.
+- [x] Create skeleton folders with `.gitkeep`: `apps/api/`, `apps/client/`, `apps/infra/`, `packages/openapi/`, `packages/client-sdk/`, `specs/runbooks/`.
+- [x] Add root `README.md` with: project blurb, prerequisites (Python 3.12, Node 22, pnpm 9, AWS CLI, CDK), quick-start commands, link to `CLAUDE.md`.
+- [x] Push initial commit to `main`.
 
 ### GitHub repo settings (one-time, via UI or `gh` CLI)
 
-- [ ] **Branch protection on `main`**: require PR before merging; require status checks (`lint`, `test`, `cdk-diff`, `openapi-check`); require linear history; squash-merge enabled; force-push disabled; deletion disabled.
-- [ ] **Secret scanning + push protection** enabled (free for public repos).
-- [ ] **Dependabot security updates** enabled.
-- [ ] **Environments → `prod`** created with required reviewer = repo owner; wait timer optional.
+- [x] **Branch protection on `main`**: require PR before merging; require status checks (`lint`, `test`, `cdk-diff`, `openapi-check`); require linear history; squash-merge enabled; force-push disabled; deletion disabled.
+- [x] **Secret scanning + push protection** enabled (free for public repos).
+- [x] **Dependabot security updates** enabled.
+- [x] **Environments → `prod`** created with required reviewer = repo owner; wait timer optional.
 
 ### Phase-0 verification (manual)
 
-- [ ] Try to commit a file containing the string `AKIA1234567890ABCDEF` → blocked by lefthook + gitleaks.
-- [ ] Try to commit a file containing `d12345abc.cloudfront.net` → blocked by gitleaks.
-- [ ] Try to push directly to `main` → blocked by branch protection.
-- [ ] Open a no-op PR → CI fires (even if it's just a no-op pipeline at this point).
+- [x] Try to commit a file containing the string `AKIA1234567890ABCDEF` → blocked by lefthook + gitleaks.
+- [x] Try to commit a file containing `d12345abc.cloudfront.net` → blocked by gitleaks.
+- [x] Try to push directly to `main` → blocked by branch protection.
+- [x] Open a no-op PR → CI fires (even if it's just a no-op pipeline at this point).
 
 ### Phase-0 deliverables
 
@@ -76,37 +76,35 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 
 **Why before features**: validates the entire AWS bootstrap, OIDC federation, CDK structure, and deploy pipeline. Discover any bootstrap pain *here*, not while debugging an auth flow.
 
-### 1a — AWS account foundation (manual, one-time)
+### 1a — AWS account foundation (manual, one-time) ✅ COMPLETE
 
-- [ ] Verify the AWS account email + billing.
-- [ ] **Hardware MFA on the root account**; remove any root-account access keys.
-- [ ] Set up **IAM Identity Center** (free) with the developer's user; assume a `Contricool-Admin` permission set with MFA for day-to-day work. No long-lived IAM users.
-- [ ] Enable **CloudTrail** in all regions, send to a dedicated audit S3 bucket with 90-day retention.
-- [ ] Configure **AWS Budgets** at $20 (warn) and $30 (critical) on the account total, filtered by `app=contricool` tag → SNS → developer's email.
-- [ ] Set the **SNS SMS account-level monthly spend limit to $5** at MVP (`set-sms-attributes` API or console). Combined with per-identity OTP rate limits, $5 covers ~125 India SMS or ~775 US SMS per month — well above MVP traffic.
-- [ ] Bootstrap CDK: `cdk bootstrap aws://<account>/us-west-2`. Also bootstrap us-east-1 separately once we register a custom domain — ACM certs for CloudFront must originate in us-east-1 even though all other resources live in us-west-2.
+- [x] Verify the AWS account email + billing.
+- [x] **Hardware MFA on the root account**; remove any root-account access keys.
+- [x] Set up **IAM Identity Center** (free) with the developer's user; assume a `Contricool-Admin` permission set with MFA for day-to-day work. No long-lived IAM users.
+- [x] Enable **CloudTrail** in all regions, send to a dedicated audit S3 bucket with 90-day retention.
+- [x] Configure **AWS Budgets** at $20 (warn) and $30 (critical) on the account total, filtered by `app=contricool` tag → SNS → developer's email.
+- [x] Set the **SNS SMS account-level monthly spend limit to $5** at MVP (`set-sms-attributes` API or console). Combined with per-identity OTP rate limits, $5 covers ~125 India SMS or ~775 US SMS per month — well above MVP traffic.
+- [x] Bootstrap CDK: `cdk bootstrap aws://<account>/us-west-2`. Also bootstrap us-east-1 separately once we register a custom domain — ACM certs for CloudFront must originate in us-east-1 even though all other resources live in us-west-2.
 
-### 1b — `apps/infra` CDK skeleton
+### 1b — `apps/infra` CDK skeleton ✅ COMPLETE (PR #3, merged 2026-04-28)
 
-- [ ] `apps/infra/pyproject.toml` with `aws-cdk-lib`, `constructs`, `aws-cdk.aws-lambda-python-alpha`.
-- [ ] `apps/infra/app.py` with two env configs (`dev`, `prod`) per Design 3.
-- [ ] Six initial stacks (mostly empty placeholders):
+- [x] `apps/infra/pyproject.toml` with `aws-cdk-lib`, `constructs`, `aws-cdk.aws-lambda-python-alpha`.
+- [x] `apps/infra/app.py` with two env configs (`dev`, `prod`) per Design 3.
+- [x] Initial stacks (Web+Edge merged per design comment to dodge CDK's auto-bucket-policy stack-cycle):
   - `Contricool-Shared` — IAM OIDC provider + 3 deploy roles + AWS Budgets + CloudTrail trail + SNS alerts topic.
-  - `Contricool-<env>-Data` — empty for now (tables added in Phase 2 + 4).
-  - `Contricool-<env>-Auth` — empty (Cognito added in Phase 2).
-  - `Contricool-<env>-Api` — Lambda function returning `{"status": "ok"}` for `/v1/health`; reserved concurrency = 100; SnapStart enabled; per-route throttling configured even if no other routes exist yet.
-  - `Contricool-<env>-Web` — S3 bucket (private, BlockPublicAccess.BLOCK_ALL) holding a static `index.html` saying "ContriCool — coming soon".
-  - `Contricool-<env>-Edge` — single CloudFront distribution per env with path-based behaviors (`/v1/*` → APIGW, `/*` → S3 with SPA fallback CF Function).
-  - `Contricool-<env>-Monitoring` — alarm placeholders + dashboard stub (prod only).
-- [ ] CDK Aspect: every bucket has `BlockPublicAccess.BLOCK_ALL`; every Lambda has reserved concurrency set; every IAM role has no `*` actions on Lambda execution roles. Aspect fails synth if violated.
-- [ ] CDK Aspect: every resource carries `app=contricool`, `env=<env>` tags.
+  - `Contricool-<env>-Api` — Lambda function returning `{"status": "ok"}` for `/v1/health`; reserved concurrency = 100; SnapStart enabled; stage-level throttling 5,000 RPS / 10,000 burst per CLAUDE.md red-line 2.
+  - `Contricool-<env>-Web` — S3 bucket (private, BlockPublicAccess.BLOCK_ALL) + CloudFront distribution per env with path-based behaviors (`/v1/*` → APIGW, `/*` → S3 with SPA fallback CF Function); holds the placeholder `index.html`.
+  - `Contricool-<env>-Monitoring` — alarm placeholders (lambda-errors, apigw-5xx) + dashboard (prod only).
+  - **Deferred** to Phase 2 / 4: separate `Data` and `Auth` stacks (added when Cognito + DDB land).
+- [x] CDK Aspect: every bucket has `BlockPublicAccess.BLOCK_ALL`; every Lambda has reserved concurrency set; CDK-internal provider Lambdas exempted via construct-path tokens. Aspect fails synth if violated.
+- [x] CDK Aspect: every resource carries `app=contricool`, `env=<env>` tags.
 
-### 1c — Hello-world Lambda
+### 1c — Hello-world Lambda ✅ COMPLETE (bundled into PR #3)
 
-- [ ] `apps/api/Dockerfile` with `public.ecr.aws/lambda/python:3.12-arm64` base + AWS Lambda Web Adapter binary copied from `public.ecr.aws/awsguru/aws-lambda-adapter`.
-- [ ] `apps/api/app/main.py` with FastAPI + uvicorn entry, single `/v1/health` route returning `{"status":"ok","commit":<env>,"version":"0.0.1"}`.
-- [ ] `apps/api/pyproject.toml` with FastAPI, uvicorn, aws-lambda-powertools.
-- [ ] `apps/api/tests/test_health.py` with one positive test.
+- [x] `apps/api/Dockerfile` with `python:3.12-slim` base + AWS Lambda Web Adapter binary copied from `public.ecr.aws/awsguru/aws-lambda-adapter:0.9.0`.
+- [x] `apps/api/app/main.py` with FastAPI + uvicorn entry, single `/v1/health` route returning `{"status":"ok","env":<env>,"version":"0.0.1"}`.
+- [x] `apps/api/pyproject.toml` with FastAPI, uvicorn, aws-lambda-powertools.
+- [x] `apps/api/tests/test_health.py` with positive test + env-default test + no-auth test (3 tests, 100% coverage).
 
 ### 1d — GitHub Actions skeleton
 
@@ -115,11 +113,11 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 - [ ] `.github/workflows/rollback.yml` (manual `workflow_dispatch`): given a previous tag, redeploy that Lambda image to prod's `live` alias.
 - [ ] GitHub repo variables `AWS_DEPLOY_ROLE_DEV`, `AWS_DEPLOY_ROLE_PROD`, `AWS_DEPLOY_ROLE_PR_RO`, `ECR_REPO_URI` set after Shared stack deploys (manually populated from CDK outputs once).
 
-### 1e — Static "coming soon" page
+### 1e — Static "coming soon" page ✅ COMPLETE (bundled into PR #3)
 
-- [ ] `apps/client/dist/index.html` (one-shot; later overwritten when real Expo build lands) with minimal HTML: "ContriCool — coming soon" + a small footer.
-- [ ] CDK `Web` stack uploads this file via `s3deploy` construct.
-- [ ] CloudFront default-behavior CF Function rewrites unknown paths to `/index.html`.
+- [x] `apps/client/static/index.html` (one-shot; later overwritten when real Expo build lands) with minimal HTML: "ContriCool — coming soon" + a small footer.
+- [x] CDK `Web` stack uploads this file via `s3deploy` construct.
+- [x] CloudFront default-behavior CF Function rewrites unknown paths to `/index.html`.
 
 ### Phase-1 tests
 
