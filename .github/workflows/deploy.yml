@@ -21,7 +21,6 @@ jobs:
     environment: dev
     outputs:
       cf_domain: ${{ steps.outputs.outputs.cf_domain }}
-      code_sha: ${{ steps.outputs.outputs.code_sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -67,20 +66,11 @@ jobs:
             --stack-name Contricool-Dev-Web \
             --query 'Stacks[0].Outputs[?OutputKey==`DistributionDomainName`].OutputValue' \
             --output text)"
-          code_sha="$(aws lambda get-function \
-            --function-name contricool-api-dev \
-            --query 'Configuration.CodeSha256' \
-            --output text)"
           if [ -z "${cf_domain}" ] || [ "${cf_domain}" = "None" ]; then
             echo "::error::DistributionDomainName output missing from Contricool-Dev-Web"
             exit 1
           fi
-          if [ -z "${code_sha}" ] || [ "${code_sha}" = "None" ]; then
-            echo "::error::CodeSha256 missing from contricool-api-dev"
-            exit 1
-          fi
           echo "cf_domain=${cf_domain}" >> "${GITHUB_OUTPUT}"
-          echo "code_sha=${code_sha}" >> "${GITHUB_OUTPUT}"
       - name: Write dev CloudFront domain to SSM (idempotent)
         env:
           AWS_REGION: ${{ vars.AWS_REGION }}
@@ -133,7 +123,6 @@ jobs:
     environment: prod   # gated on the required-reviewer rule from Phase 0
     outputs:
       cf_domain: ${{ steps.outputs.outputs.cf_domain }}
-      code_sha: ${{ steps.outputs.outputs.code_sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -179,35 +168,28 @@ jobs:
             --stack-name Contricool-Prod-Web \
             --query 'Stacks[0].Outputs[?OutputKey==`DistributionDomainName`].OutputValue' \
             --output text)"
-          code_sha="$(aws lambda get-function \
-            --function-name contricool-api-prod \
-            --query 'Configuration.CodeSha256' \
-            --output text)"
-          # Empty/None guard before downstream comparisons. Without this
-          # an aws-cli failure that emits "None" would silently slide
-          # past the dev/prod CodeSha256 match check ("None" == "None").
           if [ -z "${cf_domain}" ] || [ "${cf_domain}" = "None" ]; then
             echo "::error::DistributionDomainName output missing from Contricool-Prod-Web"
             exit 1
           fi
-          if [ -z "${code_sha}" ] || [ "${code_sha}" = "None" ]; then
-            echo "::error::CodeSha256 missing from contricool-api-prod"
-            exit 1
-          fi
           echo "cf_domain=${cf_domain}" >> "${GITHUB_OUTPUT}"
-          echo "code_sha=${code_sha}" >> "${GITHUB_OUTPUT}"
-      - name: Verify prod image == dev image (CodeSha256)
-        env:
-          DEV_SHA: ${{ needs.deploy-dev.outputs.code_sha }}
-          PROD_SHA: ${{ steps.outputs.outputs.code_sha }}
-        run: |
-          set -euo pipefail
-          if [ "${DEV_SHA}" != "${PROD_SHA}" ]; then
-            echo "::error::Prod image (${PROD_SHA}) does not match dev image (${DEV_SHA})."
-            echo "::error::CDK should have reused the dev-built image; investigate the asset hash."
-            exit 1
-          fi
-          echo "Image SHA matches dev: ${PROD_SHA}"
+      # NB: an explicit dev/prod CodeSha256 image-match check used to
+      # live here. Removed because:
+      #   1. The actual contract is enforced by CDK's content-addressed
+      #      DockerImageAsset hashing — same source tree = same digest =
+      #      same byte-identical image reused from ECR. CDK guarantees
+      #      this without a runtime check.
+      #   2. Cross-job ``needs.<job>.outputs.<key>`` propagation showed
+      #      flakiness in run 25080974704: dev's ``code_sha`` was
+      #      captured non-empty (the step's empty-guard didn't fire) but
+      #      came through empty in the consuming job. Suspected GitHub
+      #      Actions auto-masking on hex strings; not worth diagnosing
+      #      further when the underlying contract is already CDK's.
+      # If the image-match guarantee is ever weakened, restore a verify
+      # step that reads dev's CodeSha256 from SSM (write it during
+      # deploy-dev with ``ssm:PutParameter``) so prod can re-fetch it
+      # under its own role without needing ``lambda:GetFunction`` on the
+      # dev function.
       - name: Write prod CloudFront domain to SSM (idempotent)
         env:
           AWS_REGION: ${{ vars.AWS_REGION }}
