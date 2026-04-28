@@ -255,27 +255,60 @@ def test_deploy_yaml_environment_keys_explicitly_present(
         )
 
 
-def test_workflow_run_blocks_use_strict_bash(deploy_workflow: dict[str, object]) -> None:
-    """Every multi-line ``run:`` block in deploy.yml + rollback.yml must
-    open with ``set -euo pipefail`` so a partial failure aborts the step
-    instead of silently continuing. These workflows touch prod; silent
-    failures could corrupt SSM state or yield a misleading 'green' run."""
-    import re
+def _collect_run_blocks(workflow: dict[str, object]) -> list[tuple[str, str]]:
+    """Walk the parsed-YAML structure and return ``(job_id, run_value)``
+    for every multi-line ``run:`` step. Walking the loaded dict (not the
+    raw text) is the only correct way to do this — a regex on the source
+    text either over-reaches across YAML structure lines (greedy) or
+    under-reaches (skips runs across step boundaries)."""
+    blocks: list[tuple[str, str]] = []
+    jobs = workflow.get("jobs", {})
+    assert isinstance(jobs, dict)
+    for job_id, job in jobs.items():
+        assert isinstance(job, dict)
+        steps = job.get("steps", [])
+        assert isinstance(steps, list)
+        for step in steps:
+            assert isinstance(step, dict)
+            run = step.get("run")
+            if isinstance(run, str) and "\n" in run:
+                blocks.append((job_id, run))
+    return blocks
 
-    for path in (DEPLOY_YAML, ROLLBACK_YAML):
-        raw = path.read_text()
-        # Find every ``run: |`` (or ``run: |-``) block; for each, check the
-        # first non-empty inner line is ``set -euo pipefail``.
-        pattern = re.compile(
-            r"(?m)^\s*run:\s*\|-?\s*\n((?:\s+.*\n)+)",
+
+def test_deploy_yaml_run_blocks_use_strict_bash(
+    deploy_workflow: dict[str, object],
+) -> None:
+    """Every multi-line ``run:`` block in deploy.yml must open with
+    ``set -euo pipefail`` so a partial failure aborts the step instead of
+    silently continuing. This workflow touches prod; a silent partial
+    failure could corrupt SSM state or yield a misleading 'green' run."""
+    blocks = _collect_run_blocks(deploy_workflow)
+    assert blocks, "deploy.yml has no multi-line run: blocks — test is invalid"
+    for job_id, run in blocks:
+        first_line = next(
+            (ln.strip() for ln in run.splitlines() if ln.strip()),
+            "",
         )
-        for match in pattern.finditer(raw):
-            block = match.group(1)
-            first_real_line = next(
-                (ln.strip() for ln in block.splitlines() if ln.strip()),
-                "",
-            )
-            assert first_real_line == "set -euo pipefail", (
-                f"{path.name}: every multi-line `run:` block must start "
-                f"with `set -euo pipefail`; found: {first_real_line!r}"
-            )
+        assert first_line == "set -euo pipefail", (
+            f"deploy.yml job '{job_id}': multi-line `run:` must start with "
+            f"`set -euo pipefail`; got first line: {first_line!r}"
+        )
+
+
+def test_rollback_yaml_run_blocks_use_strict_bash(
+    rollback_workflow: dict[str, object],
+) -> None:
+    """Same guarantee as the deploy.yml variant, applied to rollback.yml
+    where it matters more — rollback runs touch prod by definition."""
+    blocks = _collect_run_blocks(rollback_workflow)
+    assert blocks, "rollback.yml has no multi-line run: blocks — test is invalid"
+    for job_id, run in blocks:
+        first_line = next(
+            (ln.strip() for ln in run.splitlines() if ln.strip()),
+            "",
+        )
+        assert first_line == "set -euo pipefail", (
+            f"rollback.yml job '{job_id}': multi-line `run:` must start with "
+            f"`set -euo pipefail`; got first line: {first_line!r}"
+        )

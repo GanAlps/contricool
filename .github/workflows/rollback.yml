@@ -101,6 +101,16 @@ jobs:
             --stack-name Contricool-Prod-Web \
             --query 'Stacks[0].Outputs[?OutputKey==`DistributionDomainName`].OutputValue' \
             --output text)"
+          # Empty/None guard. Without this, an absent stack output (e.g.
+          # stack stuck in ROLLBACK_COMPLETE) writes an empty value to
+          # $GITHUB_OUTPUT and the smoke step builds the URL
+          # ``https:///v1/health`` (double-slash) — curl fails with a
+          # confusing error rather than the clear cause.
+          if [ -z "${cf_domain}" ] || [ "${cf_domain}" = "None" ]; then
+            echo "::error::DistributionDomainName output missing from Contricool-Prod-Web"
+            echo "::error::The prod Web stack may be in a failed state — check CFN console."
+            exit 1
+          fi
           echo "cf_domain=${cf_domain}" >> "${GITHUB_OUTPUT}"
       - name: Smoke /v1/health on prod (retry 10x)
         env:
