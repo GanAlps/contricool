@@ -43,10 +43,13 @@ tags = ["env-leak", "contricool"]
 # region name would suppress real findings on the same line).
 
 [allowlist]
-description = "Docs-only allowlist for design references"
+description = "Docs-only + test-fixture allowlist"
 paths = [
     '''^specs/.*\.md$''',
     '''^CLAUDE\.md$''',
     '''^README\.md$''',
     '''^\.gitleaks\.toml$''',
+    # Test files legitimately use synthetic ARNs (e.g. 111111111111) for
+    # CDK assertions. Production code must never reference fake accounts.
+    '''^apps/.*/tests/.*\.py$''',
 ]
