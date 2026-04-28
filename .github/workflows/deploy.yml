@@ -171,6 +171,17 @@ jobs:
             --function-name contricool-api-prod \
             --query 'Configuration.CodeSha256' \
             --output text)"
+          # Empty/None guard before downstream comparisons. Without this
+          # an aws-cli failure that emits "None" would silently slide
+          # past the dev/prod CodeSha256 match check ("None" == "None").
+          if [ -z "${cf_domain}" ] || [ "${cf_domain}" = "None" ]; then
+            echo "::error::DistributionDomainName output missing from Contricool-Prod-Web"
+            exit 1
+          fi
+          if [ -z "${code_sha}" ] || [ "${code_sha}" = "None" ]; then
+            echo "::error::CodeSha256 missing from contricool-api-prod"
+            exit 1
+          fi
           echo "cf_domain=${cf_domain}" >> "${GITHUB_OUTPUT}"
           echo "code_sha=${code_sha}" >> "${GITHUB_OUTPUT}"
       - name: Verify prod image == dev image (CodeSha256)

@@ -222,3 +222,60 @@ def test_rollback_yaml_smokes_after_deploy(rollback_workflow: dict[str, object])
     raw = ROLLBACK_YAML.read_text()
     assert "/v1/health" in raw
     assert "Smoke" in raw
+
+
+def test_rollback_yaml_dereferences_annotated_tags(
+    rollback_workflow: dict[str, object],
+) -> None:
+    """Annotated tags (created by ``deploy.yml``'s ``git tag -a``) point at
+    a tag-object, not the underlying commit. ``git rev-parse refs/tags/X``
+    returns the tag-object SHA, which ``merge-base --is-ancestor`` will
+    always reject. The ``^{}`` peel suffix dereferences to the commit.
+    Without this, every rollback fails the ancestry check."""
+    raw = ROLLBACK_YAML.read_text()
+    assert "^{}" in raw, (
+        "rollback.yml must dereference annotated tags via ``^{}`` before "
+        "passing to git merge-base — see commit history for the bug"
+    )
+
+
+def test_deploy_yaml_environment_keys_explicitly_present(
+    deploy_workflow: dict[str, object],
+) -> None:
+    """Beyond asserting environment values, assert the key itself is
+    present on every job that should be gated. Catches a 'someone deleted
+    the line' regression that wouldn't be caught by an equality test alone
+    (the equality test would emit a misleading KeyError instead of a
+    clean assertion failure)."""
+    jobs = deploy_workflow["jobs"]
+    for job_id in ("deploy-dev", "smoke-dev", "deploy-prod", "smoke-prod", "tag-release"):
+        assert "environment" in jobs[job_id], (
+            f"{job_id} must declare an `environment:` key for OIDC + "
+            f"approval-gate scoping"
+        )
+
+
+def test_workflow_run_blocks_use_strict_bash(deploy_workflow: dict[str, object]) -> None:
+    """Every multi-line ``run:`` block in deploy.yml + rollback.yml must
+    open with ``set -euo pipefail`` so a partial failure aborts the step
+    instead of silently continuing. These workflows touch prod; silent
+    failures could corrupt SSM state or yield a misleading 'green' run."""
+    import re
+
+    for path in (DEPLOY_YAML, ROLLBACK_YAML):
+        raw = path.read_text()
+        # Find every ``run: |`` (or ``run: |-``) block; for each, check the
+        # first non-empty inner line is ``set -euo pipefail``.
+        pattern = re.compile(
+            r"(?m)^\s*run:\s*\|-?\s*\n((?:\s+.*\n)+)",
+        )
+        for match in pattern.finditer(raw):
+            block = match.group(1)
+            first_real_line = next(
+                (ln.strip() for ln in block.splitlines() if ln.strip()),
+                "",
+            )
+            assert first_real_line == "set -euo pipefail", (
+                f"{path.name}: every multi-line `run:` block must start "
+                f"with `set -euo pipefail`; found: {first_real_line!r}"
+            )

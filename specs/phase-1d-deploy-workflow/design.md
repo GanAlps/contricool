@@ -71,11 +71,13 @@ A separate `dev` GitHub Environment is created (no required reviewers; just used
 
 ```yaml
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-main
   cancel-in-progress: false
 ```
 
 `cancel-in-progress: false` → two merges queue rather than overlap. CFN cannot run two deploys against the same stack simultaneously.
+
+The group key is the **literal string** `deploy-main`, not `${{ github.ref }}`. Both `deploy.yml` (only triggers on `push: main`) and `rollback.yml` (workflow_dispatch, can be triggered on any branch) use this same literal string so they serialize against each other — never run a deploy and a rollback simultaneously on prod, even if the rollback was dispatched from a non-main ref in the GitHub UI.
 
 ## The dev-image-reused-by-prod contract
 

@@ -66,3 +66,4 @@ logs/
 test-results/
 playwright-report/
 .lighthouseci/
+.claude/

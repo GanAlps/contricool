@@ -48,7 +48,11 @@ jobs:
             echo "Run: git tag --list 'release/*' to see available tags."
             exit 1
           fi
-          tag_sha="$(git rev-parse "refs/tags/${TAG}")"
+          # ``^{}`` dereferences the annotated tag object to its commit SHA.
+          # Without it, an annotated tag (which deploy.yml creates via
+          # ``git tag -a``) returns the tag-object SHA, and merge-base
+          # always rejects it as not-an-ancestor of origin/main.
+          tag_sha="$(git rev-parse "refs/tags/${TAG}^{}")"
           if ! git merge-base --is-ancestor "${tag_sha}" origin/main; then
             echo "::error::Tag ${TAG} is not an ancestor of main — refusing to roll back to it."
             exit 1

@@ -4,7 +4,14 @@
 # entry point runs locally and inside Lambda (Design 2 — "Mangum vs LWA"
 # decided LWA for dev/prod parity).
 
-FROM public.ecr.aws/docker/library/python:3.12-slim
+# Pin the base image by digest so rollback to a previous source rebuilds
+# the byte-identical image (and CDK's content-addressed asset hash stays
+# stable across re-pulls). When updating Python, bump both the tag and the
+# digest in the same PR. To resolve a fresh digest:
+#   docker pull public.ecr.aws/docker/library/python:3.12-slim
+#   docker inspect --format='{{index .RepoDigests 0}}' \
+#     public.ecr.aws/docker/library/python:3.12-slim
+FROM public.ecr.aws/docker/library/python:3.12-slim@sha256:46cb7cc2877e60fbd5e21a9ae6115c30ace7a077b9f8772da879e4590c18c2e3
 
 # AWS Lambda Web Adapter — extension binary; Lambda runtime auto-picks up
 # anything in /opt/extensions/.
