@@ -68,10 +68,11 @@ aws cloudformation describe-stacks \
 
 # 8. Populate GitHub Repo Variables (consumed by .github/workflows/deploy.yml
 #    when we add it in the next PR).
-gh variable set AWS_DEPLOY_ROLE_DEV   --body "<DevDeployRoleArn from step 6>"   --repo GanAlps/contricool
-gh variable set AWS_DEPLOY_ROLE_PROD  --body "<ProdDeployRoleArn from step 6>"  --repo GanAlps/contricool
-gh variable set AWS_DEPLOY_ROLE_PR_RO --body "<PRReadOnlyRoleArn from step 6>" --repo GanAlps/contricool
-gh variable set AWS_REGION            --body "us-west-2"                       --repo GanAlps/contricool
+gh variable set AWS_DEPLOY_ROLE_DEV     --body "<DevDeployRoleArn from step 6>"   --repo GanAlps/contricool
+gh variable set AWS_DEPLOY_ROLE_PROD    --body "<ProdDeployRoleArn from step 6>"  --repo GanAlps/contricool
+gh variable set AWS_DEPLOY_ROLE_PR_RO   --body "<PRReadOnlyRoleArn from step 6>" --repo GanAlps/contricool
+gh variable set AWS_REGION              --body "us-west-2"                       --repo GanAlps/contricool
+gh variable set CONTRICOOL_ALERTS_EMAIL --body "$CONTRICOOL_ALERTS_EMAIL"        --repo GanAlps/contricool
 
 # 8.5. Populate the AWS_ACCOUNT_ID secret (consumed by .github/workflows/ci.yml
 #      cdk-diff job for CDK_DEFAULT_ACCOUNT). Account ID is non-secret per
