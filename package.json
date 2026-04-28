@@ -1,0 +1,16 @@
+{
+  "name": "contricool",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=9"
+  },
+  "scripts": {
+    "prepare": "lefthook install || true"
+  },
+  "devDependencies": {
+    "lefthook": "^1.8.5"
+  }
+}

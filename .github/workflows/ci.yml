@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel superseded runs to save Actions minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so gitleaks scans everything
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          GITLEAKS_VERSION=8.22.0
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o gitleaks.tar.gz
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          rm gitleaks gitleaks.tar.gz
+          gitleaks version
+      - name: Scan history
+        run: gitleaks detect --redact --no-banner --config .gitleaks.toml --exit-code 1
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint placeholder
+        run: |
+          echo "Lint job is a no-op until source code lands."
+          echo "Phase 1+: ruff + mypy on apps/api and apps/infra; biome + tsc on apps/client and packages/*."
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test placeholder
+        run: |
+          echo "Test job is a no-op until source code lands."
+          echo "Phase 1+: pytest --cov-fail-under=99 on apps/api; vitest on apps/client."
+
+  cdk-diff:
+    name: cdk-diff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: cdk diff placeholder
+        run: |
+          echo "cdk-diff is a no-op until apps/infra lands in Phase 1."
+
+  openapi-check:
+    name: openapi-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: openapi-check placeholder
+        run: |
+          echo "openapi-check is a no-op until apps/api lands in Phase 2."

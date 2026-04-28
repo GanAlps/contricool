@@ -1,0 +1,21 @@
+# Pre-commit / pre-push git hooks
+# Tools (gitleaks, ruff, mypy, biome, tsc) must be installed on the dev machine.
+# See README "Local dev setup" for install commands.
+
+pre-commit:
+  parallel: true
+  commands:
+    # RED LINE 1 — block secrets / env identifiers from ever being committed.
+    gitleaks:
+      run: gitleaks protect --staged --redact --no-banner --config .gitleaks.toml
+
+    # Ruff / mypy / biome / tsc are activated incrementally as code lands in
+    # later phases. Until apps/api and apps/client carry source files, these
+    # commands are no-ops.
+
+pre-push:
+  parallel: true
+  commands:
+    gitleaks-full:
+      # Full-history scan before push (catches anything that bypassed pre-commit).
+      run: gitleaks detect --redact --no-banner --config .gitleaks.toml

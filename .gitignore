@@ -1,0 +1,68 @@
+# --- Environment / secrets (red-line 1) ---
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+*.pfx
+*.p12
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+coverage/
+coverage.xml
+
+# --- Node / pnpm ---
+node_modules/
+.pnpm-store/
+.pnpm-debug.log
+.npm
+.yarn/
+yarn-error.log
+npm-debug.log
+
+# --- Builds / artifacts ---
+dist/
+build/
+out/
+.expo/
+.expo-shared/
+web-build/
+.next/
+
+# --- AWS CDK ---
+cdk.out/
+cdk.context.json
+*.staging/
+.cdk.staging/
+
+# --- IDE / editor ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Logs ---
+*.log
+logs/
+
+# --- Test artifacts ---
+test-results/
+playwright-report/
+.lighthouseci/

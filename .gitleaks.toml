@@ -1,0 +1,78 @@
+# gitleaks config for ContriCool
+# Inherits default rules (AWS keys, JWT, generic secrets, etc.) and adds
+# project-specific rules to enforce CLAUDE.md red-line 1: no env-specific
+# identifiers in source.
+
+[extend]
+useDefault = true
+
+# --- Project-specific rules ---
+
+[[rules]]
+id = "contricool-cloudfront-default-domain"
+description = "CloudFront default domain (d<id>.cloudfront.net) leaks env attack surface"
+regex = '''d[0-9a-z]{10,14}\.cloudfront\.net'''
+tags = ["env-leak", "contricool"]
+
+[[rules]]
+id = "contricool-apigateway-execute-api"
+description = "API Gateway execute-api hostnames leak env attack surface"
+regex = '''[a-z0-9]{10}\.execute-api\.[a-z0-9-]+\.amazonaws\.com'''
+tags = ["env-leak", "contricool"]
+
+[[rules]]
+id = "contricool-cognito-idp-issuer"
+description = "Cognito IDP issuer URLs leak env attack surface"
+regex = '''cognito-idp\.[a-z0-9-]+\.amazonaws\.com/[a-z0-9-]+_[A-Za-z0-9]+'''
+tags = ["env-leak", "contricool"]
+
+[[rules]]
+id = "contricool-aws-arn-account-id"
+description = "Real AWS account IDs in ARNs leak account info"
+regex = '''arn:aws:[a-z0-9-]+:[a-z0-9-]*:[1-9]\d{11}:'''
+tags = ["env-leak", "contricool"]
+
+# --- Project-wide allowlist ---
+
+[allowlist]
+description = "Documentation placeholders + known-fake values"
+regexes = [
+    # Placeholder syntax in docs/code
+    '''<account-id>''',
+    '''<account>''',
+    '''<api-id>''',
+    '''<pool-id>''',
+    '''<userPoolId>''',
+    '''<userPoolClientId>''',
+    '''<id>''',
+    '''<env>''',
+    '''<min>''',
+    '''<max>''',
+    '''<short-sha>''',
+    '''<sha>''',
+    '''<hash>''',
+    '''<hex>''',
+    '''<token>''',
+    # Documented example domains used throughout designs
+    '''d-prod\.cloudfront\.net''',
+    '''d-dev\.cloudfront\.net''',
+    '''d-<[a-z]+(-[a-z]+)?>\.cloudfront\.net''',
+    '''d1234[a-z0-9]*\.cloudfront\.net''',
+    '''d111111abcdef8\.cloudfront\.net''',
+    # AWS canonical fake account ID
+    '''123456789012''',
+    # AWS canonical regions in docs
+    '''us-east-1''',
+    '''ap-south-1''',
+    # Cognito issuer placeholder
+    '''cognito-idp\.[a-z0-9-]+\.amazonaws\.com/<[^>]+>''',
+    '''cognito-idp\.[a-z0-9-]+\.amazonaws\.com/\$\{[^}]+\}''',
+]
+paths = [
+    # Design docs and project guidelines may reference example URLs/IDs/ARNs
+    '''^specs/.*\.md$''',
+    '''^CLAUDE\.md$''',
+    '''^README\.md$''',
+    # gitleaks own config self-references
+    '''^\.gitleaks\.toml$''',
+]
