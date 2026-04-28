@@ -1,0 +1,140 @@
+name: Rollback (prod)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "release/YYYY-MM-DD-sha7 to roll prod back to"
+        required: true
+        type: string
+
+# Serialize against deploy.yml — never run a deploy and a rollback at the
+# same time on prod.
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write   # OIDC
+
+jobs:
+  rollback:
+    name: rollback
+    runs-on: ubuntu-latest
+    environment: prod   # gated on the required-reviewer rule from Phase 0
+    steps:
+      - name: Validate tag format
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if ! echo "${TAG}" | grep -qE '^release/[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9a-f]{7}$'; then
+            echo "::error::Invalid tag format: ${TAG}"
+            echo "Expected: release/YYYY-MM-DD-sha7 (e.g. release/2026-04-28-038ed11)"
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Verify tag exists and is on main ancestry
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if ! git rev-parse --verify "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "::error::Tag ${TAG} does not exist."
+            echo "Run: git tag --list 'release/*' to see available tags."
+            exit 1
+          fi
+          # ``^{}`` dereferences the annotated tag object to its commit SHA.
+          # Without it, an annotated tag (which deploy.yml creates via
+          # ``git tag -a``) returns the tag-object SHA, and merge-base
+          # always rejects it as not-an-ancestor of origin/main.
+          tag_sha="$(git rev-parse "refs/tags/${TAG}^{}")"
+          if ! git merge-base --is-ancestor "${tag_sha}" origin/main; then
+            echo "::error::Tag ${TAG} is not an ancestor of main — refusing to roll back to it."
+            exit 1
+          fi
+          echo "Tag ${TAG} validated (sha=${tag_sha})"
+      - name: Checkout the rollback target
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          git checkout "refs/tags/${TAG}"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install AWS CDK
+        run: npm install -g aws-cdk
+      - name: Install infra deps
+        run: pip install -e 'apps/infra[dev]'
+      - name: Configure AWS credentials (Prod deploy via OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_PROD }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: cdk deploy Contricool-Prod-* (rollback)
+        working-directory: apps/infra
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          CDK_DEFAULT_REGION: ${{ vars.AWS_REGION }}
+          CONTRICOOL_ALERTS_EMAIL: ${{ vars.CONTRICOOL_ALERTS_EMAIL }}
+        run: |
+          set -euo pipefail
+          cdk deploy 'Contricool-Prod-*' \
+            --require-approval never \
+            --rollback true \
+            --concurrency 3
+      - name: Capture rolled-back domain
+        id: outputs
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          cf_domain="$(aws cloudformation describe-stacks \
+            --stack-name Contricool-Prod-Web \
+            --query 'Stacks[0].Outputs[?OutputKey==`DistributionDomainName`].OutputValue' \
+            --output text)"
+          # Empty/None guard. Without this, an absent stack output (e.g.
+          # stack stuck in ROLLBACK_COMPLETE) writes an empty value to
+          # $GITHUB_OUTPUT and the smoke step builds the URL
+          # ``https:///v1/health`` (double-slash) — curl fails with a
+          # confusing error rather than the clear cause.
+          if [ -z "${cf_domain}" ] || [ "${cf_domain}" = "None" ]; then
+            echo "::error::DistributionDomainName output missing from Contricool-Prod-Web"
+            echo "::error::The prod Web stack may be in a failed state — check CFN console."
+            exit 1
+          fi
+          echo "cf_domain=${cf_domain}" >> "${GITHUB_OUTPUT}"
+      - name: Smoke /v1/health on prod (retry 10x)
+        env:
+          CF_DOMAIN: ${{ steps.outputs.outputs.cf_domain }}
+        run: |
+          set -euo pipefail
+          attempt=0
+          max_attempts=10
+          backoff=10
+          while [ "${attempt}" -lt "${max_attempts}" ]; do
+            http_code="$(curl -fsS -o /tmp/body.json -w '%{http_code}' \
+              "https://${CF_DOMAIN}/v1/health" || echo "000")"
+            if [ "${http_code}" = "200" ] && \
+               jq -e '.status == "ok" and .env == "prod" and (.version | length > 0)' \
+                 /tmp/body.json >/dev/null 2>&1; then
+              echo "Smoke passed on attempt $((attempt + 1))"
+              cat /tmp/body.json
+              exit 0
+            fi
+            echo "Attempt $((attempt + 1))/${max_attempts}: status=${http_code}"
+            cat /tmp/body.json 2>/dev/null || echo "<empty body>"
+            attempt=$((attempt + 1))
+            sleep "${backoff}"
+          done
+          echo "::error::Smoke failed after ${max_attempts} attempts — prod may be in a bad state."
+          echo "::error::Investigate immediately. Check CloudWatch logs at /aws/lambda/contricool-api-prod."
+          exit 1

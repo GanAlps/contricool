@@ -327,11 +327,20 @@ class SharedStack(Stack):
                 ],
             )
         )
-        # Allow reading SSM parameters at the contricool prefix (deploy needs
-        # to look up things like the operator email and table names).
+        # Allow reading and writing SSM parameters at the contricool prefix.
+        # Read: deploy needs to look up things like the operator email and
+        # table names. Write: ``.github/workflows/deploy.yml`` writes the
+        # rendered CloudFront domain to ``/contricool/<env>/cloudfront-domain``
+        # after each successful deploy so smoke tests + future runbooks can
+        # read it without re-querying CloudFormation.
         role.add_to_policy(
             iam.PolicyStatement(
-                actions=["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"],
+                actions=[
+                    "ssm:GetParameter",
+                    "ssm:GetParameters",
+                    "ssm:GetParametersByPath",
+                    "ssm:PutParameter",
+                ],
                 resources=[
                     f"arn:aws:ssm:{self._region}:{self._account}:parameter/contricool/*",
                 ],

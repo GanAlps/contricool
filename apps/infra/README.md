@@ -46,9 +46,22 @@ cdk deploy Contricool-Shared         # one-time bootstrap; see runbook below
 
 ## First-time bootstrap (one-shot, run from your laptop after merging Phase 1b)
 
-After merging this PR you need to deploy the `Contricool-Shared` stack **once from your laptop** to create the OIDC roles. After that, all deploys go through GitHub Actions.
+After merging Phase 1b you need to deploy the `Contricool-Shared` stack **once from your laptop** to create the OIDC roles. After that, all deploys go through GitHub Actions.
 
 Walkthrough lives in `specs/runbooks/first-deploy.md`.
+
+## Day-to-day deploys
+
+Phase 1d adds `.github/workflows/deploy.yml`. Once that's merged, every push to `main` triggers:
+
+1. `cdk deploy 'Contricool-Dev-*'` via OIDC against the `Contricool-CI-Dev-Deploy` role.
+2. Smoke `/v1/health` on the dev CloudFront URL.
+3. Pause for the `prod` GitHub Environment approval gate.
+4. After approval: `cdk deploy 'Contricool-Prod-*'`, with a check that the prod Lambda's `CodeSha256` matches the dev one (no second build).
+5. Smoke `/v1/health` on the prod CloudFront URL.
+6. Tag the merged commit `release/<YYYY-MM-DD>-<sha7>` and push.
+
+Rollback: `.github/workflows/rollback.yml` (manual `workflow_dispatch`); see `specs/runbooks/rollback.md`.
 
 ## Code organization
 
