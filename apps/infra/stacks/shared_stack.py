@@ -354,6 +354,20 @@ class SharedStack(Stack):
                 ],
             )
         )
+        # Allow reading the API Lambda's function metadata. ``deploy.yml``
+        # calls ``aws lambda get-function`` after each cdk deploy to capture
+        # ``CodeSha256`` for the dev/prod image-match contract. Scoped to
+        # the function name for this env (e.g. ``contricool-api-dev`` for
+        # the dev role) so the dev role can't peek at prod's function.
+        env_name = stack_name_prefix.removeprefix("Contricool-").rstrip("-").lower()
+        role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["lambda:GetFunction"],
+                resources=[
+                    f"arn:aws:lambda:{self._region}:{self._account}:function:contricool-api-{env_name}",
+                ],
+            )
+        )
         return role
 
     def _allow_cfn_on_stack_pattern(self, role: iam.Role, stack_name_pattern: str) -> None:
