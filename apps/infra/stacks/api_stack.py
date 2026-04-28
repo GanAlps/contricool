@@ -123,7 +123,7 @@ class ApiStack(Stack):
         # expose snap_start uniformly across all docker-image runtimes).
         if snapstart:
             cfn_function = self.lambda_function.node.default_child
-            assert cfn_function is not None
+            assert isinstance(cfn_function, cdk.CfnResource)
             cfn_function.add_property_override(
                 "SnapStart", {"ApplyOn": "PublishedVersions"}
             )
@@ -180,8 +180,10 @@ class ApiStack(Stack):
         # Stage-level throttling — defense in depth at API Gateway.
         # Per-route throttling for hot routes (auth, friends/add) lands in
         # Phase 2 once those routes exist.
-        cfn_default_stage = self.api_gateway.default_stage.node.default_child
-        if cfn_default_stage is not None:
+        default_stage = self.api_gateway.default_stage
+        assert default_stage is not None, "HttpApi default_stage should always exist"
+        cfn_default_stage = default_stage.node.default_child
+        if isinstance(cfn_default_stage, cdk.CfnResource):
             cfn_default_stage.add_property_override(
                 "DefaultRouteSettings",
                 {

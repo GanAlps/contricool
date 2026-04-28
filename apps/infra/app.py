@@ -21,6 +21,7 @@ Configuration that varies per environment is read from environment variables
 from __future__ import annotations
 
 import os
+from typing import TypedDict
 
 import aws_cdk as cdk
 
@@ -29,6 +30,15 @@ from stacks.api_stack import ApiStack
 from stacks.monitoring_stack import MonitoringStack
 from stacks.shared_stack import SharedStack
 from stacks.web_stack import WebStack
+
+
+class _EnvConfig(TypedDict):
+    pitr: bool
+    kms_customer_managed: bool
+    log_retention_days: int
+    xray_sampling_rate: float
+    include_dashboard: bool
+    snapstart: bool
 
 ACCOUNT = os.environ.get("CDK_DEFAULT_ACCOUNT")
 REGION = os.environ.get("CDK_DEFAULT_REGION", "us-west-2")
@@ -51,7 +61,7 @@ cdk_env = cdk.Environment(account=ACCOUNT, region=REGION)
 
 # Per-environment configuration. Values are deliberate; see
 # specs/03-hosting-infrastructure/design.md.
-ENV_CONFIGS: dict[str, dict[str, object]] = {
+ENV_CONFIGS: dict[str, _EnvConfig] = {
     "dev": {
         "pitr": False,
         "kms_customer_managed": False,
@@ -89,9 +99,9 @@ for env_name, cfg in ENV_CONFIGS.items():
         f"Contricool-{suffix}-Api",
         env=cdk_env,
         env_name=env_name,
-        snapstart=bool(cfg["snapstart"]),
-        log_retention_days=int(cfg["log_retention_days"]),
-        xray_sampling_rate=float(cfg["xray_sampling_rate"]),
+        snapstart=cfg["snapstart"],
+        log_retention_days=cfg["log_retention_days"],
+        xray_sampling_rate=cfg["xray_sampling_rate"],
     )
 
     web = WebStack(
@@ -111,7 +121,7 @@ for env_name, cfg in ENV_CONFIGS.items():
         api_lambda_alias=api.lambda_alias,
         api_gateway=api.api_gateway,
         alerts_topic_arn=shared.alerts_topic.topic_arn,
-        include_dashboard=bool(cfg["include_dashboard"]),
+        include_dashboard=cfg["include_dashboard"],
     )
     monitoring.add_dependency(api)
 
