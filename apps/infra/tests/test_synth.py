@@ -314,6 +314,66 @@ def test_web_stack_synthesizes(cdk_env: cdk.Environment) -> None:
     template.resource_count_is("AWS::CloudFront::ResponseHeadersPolicy", 1)
 
 
+def test_web_stack_csp_goes_through_security_headers_not_custom_headers(
+    cdk_env: cdk.Environment,
+) -> None:
+    """CloudFront rejects Content-Security-Policy as a custom header at
+    deploy time with ``is a security header and cannot be set as custom
+    header``. CSP (and HSTS, X-Frame-Options, X-Content-Type-Options,
+    Referrer-Policy, X-XSS-Protection) must be set via
+    ``security_headers_behavior``. Permissions-Policy is NOT on this list
+    so it stays in ``custom_headers_behavior``."""
+    app = cdk.App()
+    api = ApiStack(
+        app,
+        "Contricool-Dev-Api",
+        env=cdk_env,
+        env_name="dev",
+        snapstart=True,
+        log_retention_days=14,
+        xray_sampling_rate=1.0,
+    )
+    stack = WebStack(
+        app,
+        "Contricool-Dev-Web",
+        env=cdk_env,
+        env_name="dev",
+        api_gateway=api.api_gateway,
+    )
+    template = assertions.Template.from_stack(stack)
+    policies = template.find_resources("AWS::CloudFront::ResponseHeadersPolicy")
+    assert len(policies) == 1
+    config = next(iter(policies.values()))["Properties"]["ResponseHeadersPolicyConfig"]
+
+    # CSP belongs in SecurityHeadersConfig.
+    csp = config.get("SecurityHeadersConfig", {}).get("ContentSecurityPolicy")
+    assert csp is not None, (
+        "CSP must be set via security_headers_behavior.content_security_policy; "
+        "putting it in custom_headers_behavior makes CloudFront reject the "
+        "policy at deploy time."
+    )
+    assert "default-src" in csp.get("ContentSecurityPolicy", "")
+
+    # Reserved security headers MUST NOT appear in custom_headers.
+    custom_items = (
+        config.get("CustomHeadersConfig", {}).get("Items", [])
+    )
+    custom_header_names = {item["Header"] for item in custom_items}
+    reserved = {
+        "Content-Security-Policy",
+        "Strict-Transport-Security",
+        "X-Frame-Options",
+        "X-Content-Type-Options",
+        "Referrer-Policy",
+        "X-XSS-Protection",
+    }
+    overlap = custom_header_names & reserved
+    assert not overlap, (
+        f"Reserved security headers found in custom_headers: {overlap!r}. "
+        "CloudFront rejects these at deploy time."
+    )
+
+
 def test_monitoring_stack_dev_no_dashboard(cdk_env: cdk.Environment) -> None:
     app = cdk.App()
     api = ApiStack(

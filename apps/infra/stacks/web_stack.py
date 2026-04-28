@@ -118,24 +118,31 @@ class WebStack(Stack):
                     mode_block=True,
                     override=True,
                 ),
+                # CSP must go through ``security_headers_behavior``, not
+                # ``custom_headers_behavior``: CloudFront rejects
+                # ``Content-Security-Policy`` as a custom header with
+                # "is a security header and cannot be set as custom header"
+                # (the rejected list also includes HSTS, X-Frame-Options,
+                # X-Content-Type-Options, Referrer-Policy, X-XSS-Protection).
+                content_security_policy=cloudfront.ResponseHeadersContentSecurityPolicy(
+                    content_security_policy=(
+                        "default-src 'self'; "
+                        "img-src 'self' data:; "
+                        "script-src 'self'; "
+                        "style-src 'self' 'unsafe-inline'; "
+                        "connect-src 'self'; "
+                        "frame-ancestors 'none'"
+                    ),
+                    override=True,
+                ),
             ),
             custom_headers_behavior=cloudfront.ResponseCustomHeadersBehavior(
+                # Permissions-Policy is NOT on CloudFront's reserved security-
+                # header list, so it stays here.
                 custom_headers=[
                     cloudfront.ResponseCustomHeader(
                         header="Permissions-Policy",
                         value="camera=(), microphone=(), geolocation=()",
-                        override=True,
-                    ),
-                    cloudfront.ResponseCustomHeader(
-                        header="Content-Security-Policy",
-                        value=(
-                            "default-src 'self'; "
-                            "img-src 'self' data:; "
-                            "script-src 'self'; "
-                            "style-src 'self' 'unsafe-inline'; "
-                            "connect-src 'self'; "
-                            "frame-ancestors 'none'"
-                        ),
                         override=True,
                     ),
                 ],
