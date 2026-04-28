@@ -178,8 +178,9 @@ class ApiStack(Stack):
         )
 
         # Stage-level throttling — defense in depth at API Gateway.
-        # Per-route throttling for hot routes (auth, friends/add) lands in
-        # Phase 2 once those routes exist.
+        # Values match CLAUDE.md red-line 2: 5,000 RPS / 10,000 burst.
+        # Per-route tighter throttling for hot routes (auth, friends/add)
+        # lands in Phase 2 once those routes exist.
         default_stage = self.api_gateway.default_stage
         assert default_stage is not None, "HttpApi default_stage should always exist"
         cfn_default_stage = default_stage.node.default_child
@@ -187,8 +188,8 @@ class ApiStack(Stack):
             cfn_default_stage.add_property_override(
                 "DefaultRouteSettings",
                 {
-                    "ThrottlingBurstLimit": 100,
-                    "ThrottlingRateLimit": 50,
+                    "ThrottlingBurstLimit": 10000,
+                    "ThrottlingRateLimit": 5000,
                 },
             )
 

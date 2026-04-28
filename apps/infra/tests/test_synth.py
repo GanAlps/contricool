@@ -58,6 +58,137 @@ def test_shared_stack_synthesizes(cdk_env: cdk.Environment) -> None:
     )
 
 
+def test_alerts_topic_uses_aws_managed_encryption(cdk_env: cdk.Environment) -> None:
+    """Alerts topic must NOT specify a CMK — that path silently breaks publishes
+    from CloudWatch / Budgets / SNS without explicit key-policy grants. AWS-managed
+    SNS encryption is sufficient for operational alarm metadata at MVP."""
+    import json
+
+    app = cdk.App()
+    stack = SharedStack(
+        app,
+        "Contricool-Shared",
+        env=cdk_env,
+        github_repo="GanAlps/contricool",
+        alerts_email="ops@example.invalid",
+    )
+    template = assertions.Template.from_stack(stack)
+    topics = template.find_resources("AWS::SNS::Topic")
+    alerts = [
+        props
+        for props in topics.values()
+        if props["Properties"].get("TopicName") == "Contricool-Alerts"
+    ]
+    assert len(alerts) == 1, "Expected exactly one Contricool-Alerts topic"
+    props = alerts[0]["Properties"]
+    assert "KmsMasterKeyId" not in props, (
+        "Alerts topic must not be CMK-encrypted at MVP; "
+        f"got KmsMasterKeyId={props.get('KmsMasterKeyId')!r}. "
+        "See shared_stack.py comment on the alerts_topic block."
+    )
+    # Belt-and-braces: no key policy in the rendered template should grant
+    # cloudwatch.amazonaws.com (we removed the dependency, so the principal
+    # shouldn't appear); inverse asserts both the topic AND the key policy
+    # stay in sync.
+    keys = template.find_resources("AWS::KMS::Key")
+    for key_props in keys.values():
+        statements = key_props["Properties"]["KeyPolicy"]["Statement"]
+        principals = json.dumps(statements)
+        assert "cloudwatch.amazonaws.com" not in principals, (
+            "KMS key policy unexpectedly grants cloudwatch — if this is intentional, "
+            "re-attach the CMK to the alerts topic and update this test."
+        )
+
+
+def test_dev_deploy_role_cannot_write_shared_stack(cdk_env: cdk.Environment) -> None:
+    """The dev deploy role must not be able to UpdateStack on Contricool-Shared.
+    Shared owns the prod role's trust policy — dev write access is a privilege-
+    escalation path to prod."""
+    import json
+
+    app = cdk.App()
+    stack = SharedStack(
+        app,
+        "Contricool-Shared",
+        env=cdk_env,
+        github_repo="GanAlps/contricool",
+        alerts_email="ops@example.invalid",
+    )
+    template = assertions.Template.from_stack(stack)
+
+    # First locate the dev deploy role's logical ID.
+    roles = template.find_resources("AWS::IAM::Role")
+    dev_role_logical_id: str | None = None
+    for logical_id, props in roles.items():
+        if props["Properties"].get("RoleName") == "Contricool-CI-Dev-Deploy":
+            dev_role_logical_id = logical_id
+            break
+    assert dev_role_logical_id, "Could not locate dev deploy role"
+
+    # Then find inline policies attached to it via Ref.
+    policies = template.find_resources("AWS::IAM::Policy")
+    dev_policies = [
+        props
+        for props in policies.values()
+        if any(
+            isinstance(role, dict) and role.get("Ref") == dev_role_logical_id
+            for role in props["Properties"].get("Roles", [])
+        )
+    ]
+    assert dev_policies, "Could not locate dev deploy role's inline policy"
+
+    write_actions = {
+        "cloudformation:UpdateStack",
+        "cloudformation:CreateChangeSet",
+        "cloudformation:ExecuteChangeSet",
+        "cloudformation:CreateStack",
+        "cloudformation:DeleteStack",
+        "cloudformation:DeleteChangeSet",
+        "cloudformation:RollbackStack",
+        "cloudformation:ContinueUpdateRollback",
+    }
+    for props in dev_policies:
+        statements = props["Properties"]["PolicyDocument"]["Statement"]
+        for stmt in statements:
+            actions = stmt.get("Action", [])
+            actions = [actions] if isinstance(actions, str) else actions
+            resources = stmt.get("Resource", [])
+            resources = [resources] if isinstance(resources, str) else resources
+            if any(a in write_actions for a in actions):
+                blob = json.dumps(resources)
+                assert "Shared" not in blob, (
+                    f"Dev role grants CFN write on a Shared resource: {blob}"
+                )
+
+
+def test_pr_readonly_role_does_not_use_managed_readonly_access(
+    cdk_env: cdk.Environment,
+) -> None:
+    """PR-readonly must use a hand-rolled minimum surface, not the AWS-managed
+    ReadOnlyAccess policy (which includes secretsmanager:GetSecretValue)."""
+    app = cdk.App()
+    stack = SharedStack(
+        app,
+        "Contricool-Shared",
+        env=cdk_env,
+        github_repo="GanAlps/contricool",
+        alerts_email="ops@example.invalid",
+    )
+    template = assertions.Template.from_stack(stack)
+    roles = template.find_resources("AWS::IAM::Role")
+    pr_roles = [
+        props
+        for props in roles.values()
+        if props["Properties"].get("RoleName") == "Contricool-CI-PR-ReadOnly"
+    ]
+    assert len(pr_roles) == 1
+    managed = pr_roles[0]["Properties"].get("ManagedPolicyArns", [])
+    for arn in managed:
+        assert "ReadOnlyAccess" not in str(arn), (
+            f"PR-readonly role must not attach ReadOnlyAccess; got {arn!r}"
+        )
+
+
 def test_api_stack_synthesizes(cdk_env: cdk.Environment) -> None:
     app = cdk.App()
     stack = ApiStack(

@@ -12,6 +12,13 @@ properties directly. We deliberately keep the checks simple — partial /
 weakly-set values can be caught by deeper checks added incrementally as
 real cases appear; the immediate goal is to prevent the most common
 foot-guns (missing config altogether).
+
+CDK creates internal provider Lambdas for several constructs
+(``BucketDeployment``, ``auto_delete_objects=True``, custom-resource
+providers, log-retention helpers, OIDC provider thumbprint fetcher). We
+cannot set ``reserved_concurrent_executions`` on those — they're owned by
+the framework. The exemption list below names them by construct-path
+substring so the rule still fires on every Lambda we *do* control.
 """
 from __future__ import annotations
 
@@ -29,6 +36,20 @@ from aws_cdk import (
     aws_s3 as s3,
 )
 from constructs import IConstruct
+
+# Construct-path tokens that mark CDK-internal provider Lambdas. Matched
+# as substrings against ``node.node.path``. Add new entries when CDK
+# introduces another framework-managed Lambda we can't configure directly.
+_CDK_INTERNAL_LAMBDA_PATH_TOKENS: tuple[str, ...] = (
+    "Custom::CDKBucketDeployment",
+    "Custom::S3AutoDeleteObjects",
+    "AWSCDKOpenIdConnectProvider",
+    "LogRetention",
+    "Custom::AWS",  # AwsCustomResource
+    "framework-onEvent",
+    "framework-isComplete",
+    "framework-onTimeout",
+)
 
 
 @jsii.implements(IAspect)
@@ -55,9 +76,12 @@ class SecurityAspect:
 
     @staticmethod
     def _check_lambda_reserved_concurrency(node: lambda_.CfnFunction) -> None:
+        path = node.node.path
+        if any(token in path for token in _CDK_INTERNAL_LAMBDA_PATH_TOKENS):
+            return
         if node.reserved_concurrent_executions is None:
             Annotations.of(node).add_error(
-                f"Lambda function {node.node.path} must have "
+                f"Lambda function {path} must have "
                 "ReservedConcurrentExecutions set "
                 "(red-line 2 cost guardrail)."
             )

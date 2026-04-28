@@ -115,12 +115,19 @@ class SharedStack(Stack):
 
         # 3. SNS alerts topic — alarms across both environments fan into here,
         # subscribed to operator email.
+        #
+        # Deliberately **not** encrypted with the project CMK at MVP: the
+        # alerts payload is operational metadata (alarm name, threshold,
+        # metric) — no PII, no secrets. Adding a CMK without granting
+        # ``cloudwatch.amazonaws.com`` / ``budgets.amazonaws.com`` /
+        # ``sns.amazonaws.com`` on the key policy silently breaks every
+        # publish path. AWS-managed encryption (``aws/sns``) is on by default
+        # in transit + at rest and is sufficient for this content.
         self.alerts_topic = sns.Topic(
             self,
             "AlertsTopic",
             topic_name="Contricool-Alerts",
             display_name="ContriCool Alerts",
-            master_key=self.prod_cmk,
         )
         self.alerts_topic.add_subscription(
             sns_subscriptions.EmailSubscription(alerts_email)
@@ -152,9 +159,12 @@ class SharedStack(Stack):
             stack_name_prefix="Contricool-Dev-",
             description="GitHub Actions deploys to dev (main branch only)",
         )
-        # Dev also redeploys Shared (it's where roles live, so dev role keeps
-        # bootstrapping consistent on Shared changes).
-        self._allow_cfn_on_stack_pattern(self.dev_deploy_role, "Contricool-Shared")
+        # NB: dev role intentionally has **no** CFN write permissions on
+        # Contricool-Shared. Shared owns the prod role's trust policy, so a
+        # dev-role grant on Shared would be a privilege-escalation path
+        # (rewrite prod trust → assume prod, bypassing the Environment
+        # approval gate). Shared changes are a documented one-shot manual
+        # operation — see specs/runbooks/first-deploy.md.
 
         self.prod_deploy_role = self._make_deploy_role(
             "Contricool-CI-Prod-Deploy",
@@ -186,9 +196,62 @@ class SharedStack(Stack):
             ),
             description="GitHub Actions read-only role for PR cdk-diff comments",
             max_session_duration=Duration.hours(1),
-            managed_policies=[
-                iam.ManagedPolicy.from_aws_managed_policy_name("ReadOnlyAccess"),
-            ],
+        )
+        # Hand-rolled minimum surface needed by `cdk diff`. Deliberately
+        # **not** AWS-managed ``ReadOnlyAccess`` — that policy includes
+        # ``secretsmanager:GetSecretValue`` and ``ssm:GetParameter`` on
+        # SecureString values, which would let any malicious PR exfiltrate
+        # the moment Phase 2 introduces real secrets.
+        self.pr_readonly_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "cloudformation:DescribeStacks",
+                    "cloudformation:DescribeStackEvents",
+                    "cloudformation:DescribeStackResource",
+                    "cloudformation:DescribeStackResources",
+                    "cloudformation:GetTemplate",
+                    "cloudformation:GetTemplateSummary",
+                    "cloudformation:ListStacks",
+                    "cloudformation:ListStackResources",
+                    "cloudformation:DescribeChangeSet",
+                    "cloudformation:ListChangeSets",
+                ],
+                resources=[
+                    f"arn:aws:cloudformation:{self._region}:{self._account}:stack/Contricool-*/*",
+                ],
+            )
+        )
+        # CDK assets live in the bootstrap S3 bucket; cdk diff reads them.
+        self.pr_readonly_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["s3:GetObject", "s3:GetBucketLocation", "s3:ListBucket"],
+                resources=[
+                    f"arn:aws:s3:::cdk-*-assets-{self._account}-{self._region}",
+                    f"arn:aws:s3:::cdk-*-assets-{self._account}-{self._region}/*",
+                ],
+            )
+        )
+        # ECR image-asset diffs.
+        self.pr_readonly_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "ecr:DescribeRepositories",
+                    "ecr:DescribeImages",
+                    "ecr:BatchGetImage",
+                    "ecr:GetDownloadUrlForLayer",
+                    "ecr:ListImages",
+                ],
+                resources=[
+                    f"arn:aws:ecr:{self._region}:{self._account}:repository/cdk-*",
+                ],
+            )
+        )
+        # Bootstrap-role lookup (cdk diff calls sts:GetCallerIdentity, etc.).
+        self.pr_readonly_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["sts:GetCallerIdentity"],
+                resources=["*"],
+            )
         )
 
         # 7. CDK outputs — consumed by GitHub Repo Variables (manual one-time

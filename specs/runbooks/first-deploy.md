@@ -73,8 +73,15 @@ gh variable set AWS_DEPLOY_ROLE_PROD  --body "<ProdDeployRoleArn from step 6>"  
 gh variable set AWS_DEPLOY_ROLE_PR_RO --body "<PRReadOnlyRoleArn from step 6>" --repo GanAlps/contricool
 gh variable set AWS_REGION            --body "us-west-2"                       --repo GanAlps/contricool
 
+# 8.5. Populate the AWS_ACCOUNT_ID secret (consumed by .github/workflows/ci.yml
+#      cdk-diff job for CDK_DEFAULT_ACCOUNT). Account ID is non-secret per
+#      CLAUDE.md red-line 1, but Secret is the more restrictive home (and ci.yml
+#      reads it from secrets, not vars).
+gh secret set AWS_ACCOUNT_ID --body "$CDK_DEFAULT_ACCOUNT" --repo GanAlps/contricool
+
 # 9. Verify variables are set (values won't display, but list will).
 gh variable list --repo GanAlps/contricool
+gh secret list   --repo GanAlps/contricool
 
 # 10. (Optional) deploy the per-env stacks from your laptop now to validate
 #     end-to-end. Phase 1d adds the GitHub Actions deploy workflow that takes
@@ -82,8 +89,10 @@ gh variable list --repo GanAlps/contricool
 cdk deploy 'Contricool-Dev-*' --require-approval never --rollback true
 
 # 11. Smoke-test:
+# NB: the CloudFront distribution lives in the Web stack (Web+Edge merged
+# into one stack to dodge CDK's auto-bucket-policy stack-cycle).
 DEV_DOMAIN=$(aws cloudformation describe-stacks \
-    --stack-name Contricool-Dev-Edge \
+    --stack-name Contricool-Dev-Web \
     --query 'Stacks[0].Outputs[?OutputKey==`DistributionDomainName`].OutputValue' \
     --output text \
     --profile contricool-admin)

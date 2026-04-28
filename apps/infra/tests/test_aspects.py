@@ -115,3 +115,45 @@ def test_lambda_with_reserved_concurrency_emits_no_error(cdk_outdir: Path) -> No
     assert not lambda_errors, (
         f"Expected no lambda errors for properly-configured function; got: {lambda_errors!r}"
     )
+
+
+def test_cdk_internal_lambdas_are_exempt_from_concurrency_check(cdk_outdir: Path) -> None:
+    """CDK-managed provider Lambdas (BucketDeployment, auto_delete_objects)
+    cannot have reserved concurrency configured by the user. The Aspect must
+    skip them so synth still succeeds."""
+    from aws_cdk import (
+        aws_s3 as s3,
+    )
+    from aws_cdk import (
+        aws_s3_deployment as s3_deployment,
+    )
+
+    app = cdk.App(outdir=str(cdk_outdir))
+    stack = Stack(app, "TestStack")
+    bucket = s3.Bucket(
+        stack,
+        "ExemptBucket",
+        block_public_access=s3.BlockPublicAccess(
+            block_public_acls=True,
+            block_public_policy=True,
+            ignore_public_acls=True,
+            restrict_public_buckets=True,
+        ),
+        encryption=s3.BucketEncryption.S3_MANAGED,
+        removal_policy=cdk.RemovalPolicy.DESTROY,
+        auto_delete_objects=True,
+    )
+    s3_deployment.BucketDeployment(
+        stack,
+        "ExemptDeployment",
+        sources=[s3_deployment.Source.data("hello.txt", "hi")],
+        destination_bucket=bucket,
+    )
+    cdk.Aspects.of(app).add(SecurityAspect())
+
+    errors = _collect_errors(app)
+    concurrency_errors = [e for e in errors if "ReservedConcurrentExecutions" in e]
+    assert not concurrency_errors, (
+        "BucketDeployment + auto_delete_objects provider lambdas must be "
+        f"exempt from the concurrency check; got: {concurrency_errors!r}"
+    )
