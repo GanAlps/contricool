@@ -161,6 +161,63 @@ def test_dev_deploy_role_cannot_write_shared_stack(cdk_env: cdk.Environment) -> 
                 )
 
 
+def test_deploy_role_trust_patterns_match_workflow_environment_keys(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Both deploy roles must trust ``:environment:<env>`` sub claims, not
+    ``:ref:refs/heads/main``. ``deploy.yml`` declares ``environment: dev``
+    and ``environment: prod`` on the per-env jobs; GitHub's OIDC ``sub``
+    claim takes the form ``repo:OWNER/REPO:environment:<env>`` whenever a
+    job has an ``environment:`` key. A ``ref:`` trust would fail with
+    ``Not authorized to perform sts:AssumeRoleWithWebIdentity`` even
+    though the merge to main is exactly what triggered the workflow."""
+    import json
+
+    app = cdk.App()
+    stack = SharedStack(
+        app,
+        "Contricool-Shared",
+        env=cdk_env,
+        github_repo="GanAlps/contricool",
+        alerts_email="ops@example.invalid",
+    )
+    template = assertions.Template.from_stack(stack)
+    roles = template.find_resources("AWS::IAM::Role")
+
+    expected_subs = {
+        "Contricool-CI-Dev-Deploy": "repo:GanAlps/contricool:environment:dev",
+        "Contricool-CI-Prod-Deploy": "repo:GanAlps/contricool:environment:prod",
+    }
+    seen: dict[str, bool] = {name: False for name in expected_subs}
+
+    for props in roles.values():
+        role_name = props["Properties"].get("RoleName")
+        if role_name not in expected_subs:
+            continue
+        trust = props["Properties"]["AssumeRolePolicyDocument"]
+        statements = trust["Statement"]
+        # Each role has exactly one OIDC trust statement.
+        assert len(statements) == 1, (
+            f"{role_name} has {len(statements)} trust statements; "
+            f"expected exactly 1: {json.dumps(statements)}"
+        )
+        condition = statements[0].get("Condition", {})
+        sub_pattern = (
+            condition.get("StringLike", {}).get("token.actions.githubusercontent.com:sub")
+        )
+        assert sub_pattern == expected_subs[role_name], (
+            f"{role_name}: trust ``sub`` is {sub_pattern!r}, "
+            f"expected {expected_subs[role_name]!r}. A ``ref:`` trust "
+            f"will reject the OIDC token from a job that declares "
+            f"``environment:`` because GitHub emits ``:environment:<env>`` "
+            f"in the sub claim, not ``:ref:refs/heads/main``."
+        )
+        seen[role_name] = True
+
+    missing = [name for name, found in seen.items() if not found]
+    assert not missing, f"Could not locate trust on roles: {missing}"
+
+
 def test_pr_readonly_role_does_not_use_managed_readonly_access(
     cdk_env: cdk.Environment,
 ) -> None:

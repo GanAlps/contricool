@@ -179,7 +179,7 @@ The rollback job runs in the `prod` environment, so it requires the same approva
 
 | Workflow         | Job        | OIDC role                          | Why                                                |
 |------------------|------------|------------------------------------|----------------------------------------------------|
-| `deploy.yml`     | `deploy-dev` | `Contricool-CI-Dev-Deploy`        | Trust: `repo:${repo}:ref:refs/heads/main`. CFN write on `Contricool-Dev-*`. ECR + bootstrap roles. |
+| `deploy.yml`     | `deploy-dev` | `Contricool-CI-Dev-Deploy`        | Trust: `repo:${repo}:environment:dev`. CFN write on `Contricool-Dev-*`. ECR + bootstrap roles. Main-branch-only enforcement via the workflow's `on: push: branches: [main]` trigger. |
 | `deploy.yml`     | `deploy-prod`| `Contricool-CI-Prod-Deploy`       | Trust: `repo:${repo}:environment:prod`. CFN write on `Contricool-Prod-*`. ECR + bootstrap roles.    |
 | `deploy.yml`     | `smoke-*`    | none                              | Public curl; no AWS calls beyond an SSM read (which uses the role from the previous deploy job's session — but jobs don't share sessions, so we'd need a new role assumption). **TBD: read SSM domain via OIDC or read it via a CFN output of the deploy step?** Decision: pass the domain across jobs via `outputs:` from the deploy step rather than re-assuming a role. |
 | `deploy.yml`     | `tag-release`| none (GITHUB_TOKEN)                | Just `git tag` + `git push`; uses `GITHUB_TOKEN` with `contents: write` permission scoped to this job. |
