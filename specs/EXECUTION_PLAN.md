@@ -82,9 +82,9 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 - [ ] **Hardware MFA on the root account**; remove any root-account access keys.
 - [ ] Set up **IAM Identity Center** (free) with the developer's user; assume a `Contricool-Admin` permission set with MFA for day-to-day work. No long-lived IAM users.
 - [ ] Enable **CloudTrail** in all regions, send to a dedicated audit S3 bucket with 90-day retention.
-- [ ] Configure **AWS Budgets** at $20 (warn) and $30 (critical), filtered by `app=contricool` tag → SNS → developer's email.
-- [ ] Set the **SNS SMS account-level monthly spend limit to $20** (`set-sms-attributes` API or console).
-- [ ] Bootstrap CDK: `cdk bootstrap aws://<account>/us-east-1`.
+- [ ] Configure **AWS Budgets** at $20 (warn) and $30 (critical) on the account total, filtered by `app=contricool` tag → SNS → developer's email.
+- [ ] Set the **SNS SMS account-level monthly spend limit to $5** at MVP (`set-sms-attributes` API or console). Combined with per-identity OTP rate limits, $5 covers ~125 India SMS or ~775 US SMS per month — well above MVP traffic.
+- [ ] Bootstrap CDK: `cdk bootstrap aws://<account>/us-west-2`. Also bootstrap us-east-1 separately once we register a custom domain — ACM certs for CloudFront must originate in us-east-1 even though all other resources live in us-west-2.
 
 ### 1b — `apps/infra` CDK skeleton
 
@@ -573,7 +573,7 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 
 - [ ] Check DLT registration status for India SMS sender ID. If not yet approved, document fallback (patchy India SMS at launch) in launch runbook.
 - [ ] Decide whether to register `contricool.com` pre-launch:
-  - If yes: ACM cert in us-east-1 covering `contricool.com` + `*.contricool.com`; Route 53 hosted zone; SES domain verification + DKIM/SPF/DMARC; switch Cognito to SES; activate friend-invite emails.
+  - If yes: ACM cert in **us-east-1** (mandatory for CloudFront — even though our primary region is us-west-2) covering `contricool.com` + `*.contricool.com`; Route 53 hosted zone; SES domain verification + DKIM/SPF/DMARC in us-west-2; switch Cognito to SES; activate friend-invite emails.
   - If no: launch on default CloudFront URL; defer SES + invite emails post-launch.
 
 ### 7d — WAF activation decision

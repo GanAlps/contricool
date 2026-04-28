@@ -14,7 +14,7 @@ Implication: hobbyist scale. Pure serverless that auto-scales-to-zero is the rig
 - **Markets**: US + India (both at launch)
 
 Implications:
-- Single AWS region with global edge — likely **us-east-1** + CloudFront (lowest latency to US, acceptable to India via CloudFront edge POPs). Re-validate in Hosting Design.
+- Single AWS region with global edge — likely **us-west-2** + CloudFront (lowest latency to US, acceptable to India via CloudFront edge POPs). Re-validate in Hosting Design.
 - Compliance: CCPA-leaning for US + India's DPDP Act for India. No GDPR unless EU users sneak in (treat as guard-rail, not target).
 - SMS delivery: SNS / Pinpoint must support both +1 (US) and +91 (India) numbers. Cost is non-trivial in India — design verification flow accordingly.
 
@@ -81,6 +81,6 @@ Implications:
 
 The constraints above mostly point in one consistent direction:
 
-> **Ultra-lean serverless on AWS Free Tier, single region (us-east-1), Cognito + Lambda + DynamoDB + S3+CloudFront + SES + minimal SNS, CDK in Python, monorepo with GitHub Actions, no VPC, no Aurora, no Fargate.**
+> **Ultra-lean serverless on AWS Free Tier, single region (us-west-2), Cognito + Lambda + DynamoDB + S3+CloudFront + SES + minimal SNS, CDK in Python, monorepo with GitHub Actions, no VPC, no Aurora, no Fargate.**
 
 Designs should default to that posture and only deviate when a clear technical need overrides it (with the deviation called out explicitly).

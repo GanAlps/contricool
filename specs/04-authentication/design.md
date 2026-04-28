@@ -155,7 +155,7 @@ sequenceDiagram
 - **Originating numbers**:
   - **US**: 10DLC long code (~$1/mo + per-msg fees) — register via SNS Origination Numbers console.
   - **India**: Sender ID `CONTRICOOL` registered via DLT (TRAI). Without DLT, delivery is unreliable. **Start DLT registration in parallel with implementation.** Until DLT clears, accept patchy India SMS deliverability.
-- **Spend cap**: SNS account-level monthly spend limit `$20`.
+- **Spend cap**: SNS account-level monthly spend limit **`$5`** at MVP (raise via Service Quotas request once real volume justifies it). Combined with the per-identity OTP rate limit (3/h, 10/day SMS), $5 covers ~125 India SMS or ~775 US SMS per month — comfortably above MVP traffic.
 - **Rate limit per identity** (rows in `ContriCool-Users-<env>` table): OTP request 3/hour, 10/day.
 
 ### Identity Store of Record
@@ -196,7 +196,7 @@ Endpoints (full contract in Design 8):
 
 ### API Gateway JWT Authorizer
 
-- API Gateway HTTP API has a built-in JWT authorizer pointed at Cognito (`https://cognito-idp.us-east-1.amazonaws.com/<userPoolId>/.well-known/openid-configuration`).
+- API Gateway HTTP API has a built-in JWT authorizer pointed at Cognito (`https://cognito-idp.us-west-2.amazonaws.com/<userPoolId>/.well-known/openid-configuration`).
 - Verifies signature, expiry, audience (= app client ID), and issuer.
 - Injects `claims` into the Lambda event under `event.requestContext.authorizer.jwt.claims` — Lambda code reads `custom:user_id` from there, never trusts the request body for identity.
 - All `/v1/*` routes require auth **except**: `/v1/auth/signup`, `/v1/auth/login`, `/v1/auth/verify-email`, `/v1/auth/verify-phone`, `/v1/auth/refresh`, `/v1/auth/forgot-password`, `/v1/auth/reset-password`, `/v1/auth/resend-*`, `/v1/health`, `/v1/telemetry/error`.

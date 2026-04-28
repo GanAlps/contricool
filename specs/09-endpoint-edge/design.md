@@ -34,7 +34,7 @@ flowchart LR
 | `www.contricool.com` | Route 53 alias → prod CloudFront (alt name); CF Function 301 to apex |
 | `dev.contricool.com` | Route 53 alias → dev CloudFront |
 
-The same prod CloudFront distribution serves both the default `cloudfront.net` domain and the new alternate domain names — **no behavior changes**, no re-architecture, no app code change. Just attach an ACM cert (us-east-1) covering `contricool.com` + `*.contricool.com` and add Route 53 records.
+The same prod CloudFront distribution serves both the default `cloudfront.net` domain and the new alternate domain names — **no behavior changes**, no re-architecture, no app code change. Just attach an ACM cert covering `contricool.com` + `*.contricool.com` (issued in **us-east-1** because CloudFront requires it; this is the only resource we'll have outside our primary us-west-2 region) and add Route 53 records.
 
 ### Why one CloudFront distribution per env (instead of two — web + API)
 
@@ -71,7 +71,7 @@ API behaviors don't need these (the API never serves HTML); they get forwarded a
 
 ### CloudFront other settings (per env)
 
-- **TLS**: AWS-default `*.cloudfront.net` cert at MVP (free; TLSv1.2_2021 minimum). When custom domain attaches, an ACM cert in us-east-1 covering `contricool.com` + `*.cloudfront.com` replaces it (also free).
+- **TLS**: AWS-default `*.cloudfront.net` cert at MVP (free; TLSv1.2_2021 minimum). When custom domain attaches, an ACM cert in **us-east-1** (mandatory for CloudFront) covering `contricool.com` + `*.contricool.com` replaces it (also free).
 - **Compression**: gzip + brotli enabled.
 - **HTTP/2 + HTTP/3**: enabled.
 - **Price class**: PriceClass_100 (US, Canada, Europe). India users still hit nearby edges via the global fabric; PriceClass_All move when India latency metrics warrant.
@@ -80,7 +80,7 @@ API behaviors don't need these (the API never serves HTML); they get forwarded a
 ### API Gateway HTTP API configuration
 
 - **One API per env**: `contricool-api-prod`, `contricool-api-dev`.
-- **No custom domain on API Gateway** — CloudFront is the public hostname; the `<api-id>.execute-api.us-east-1.amazonaws.com` URL is private to our CloudFront origin.
+- **No custom domain on API Gateway** — CloudFront is the public hostname; the `<api-id>.execute-api.us-west-2.amazonaws.com` URL is private to our CloudFront origin.
 - **Stage**: single `$default` (HTTP API auto-deploys).
 - **Routes**: catch-all `ANY /v1/{proxy+}` → Lambda. FastAPI routes inside.
 - **Authorizer**: Cognito JWT authorizer applied at the API level; specific public routes (`/v1/auth/signup`, `/v1/auth/login`, `/v1/health`, etc.) marked `authorizationType: NONE`.
@@ -113,7 +113,7 @@ API keys, usage plans, and request transformations aren't needed at MVP — the 
 
 ### TLS (when custom domain arrives)
 
-- **ACM cert in us-east-1** covering `contricool.com` + `*.contricool.com`. DNS-validated; auto-renews.
+- **ACM cert in us-east-1** (mandatory for CloudFront — the rest of our infra is in us-west-2) covering `contricool.com` + `*.contricool.com`. DNS-validated; auto-renews.
 - Same cert serves both prod and dev distributions (wildcard covers `dev.contricool.com`).
 
 ### CORS
