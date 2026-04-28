@@ -22,7 +22,7 @@ tags = ["env-leak", "contricool"]
 
 [[rules]]
 id = "contricool-cognito-idp-issuer"
-description = "Cognito IDP issuer URLs leak env attack surface"
+description = "Cognito IDP issuer URLs (region.amazonaws.com/poolId) leak env attack surface"
 regex = '''cognito-idp\.[a-z0-9-]+\.amazonaws\.com/[a-z0-9-]+_[A-Za-z0-9]+'''
 tags = ["env-leak", "contricool"]
 
@@ -32,47 +32,21 @@ description = "Real AWS account IDs in ARNs leak account info"
 regex = '''arn:aws:[a-z0-9-]+:[a-z0-9-]*:[1-9]\d{11}:'''
 tags = ["env-leak", "contricool"]
 
-# --- Project-wide allowlist ---
+# --- Path-based allowlist ---
+# Documentation, the gitleaks config itself, and project guidelines may
+# legitimately reference example URLs / IDs / ARNs (often as placeholders
+# like d-<id>.cloudfront.net or arn:aws:iam::<account>:role/...).
+# Keep this list TIGHT: never allowlist source-code paths.
+#
+# We intentionally do NOT use a regex-level allowlist (the way gitleaks scopes
+# regex allowlists to the entire matched line is too coarse — a single
+# region name would suppress real findings on the same line).
 
 [allowlist]
-description = "Documentation placeholders + known-fake values"
-regexes = [
-    # Placeholder syntax in docs/code
-    '''<account-id>''',
-    '''<account>''',
-    '''<api-id>''',
-    '''<pool-id>''',
-    '''<userPoolId>''',
-    '''<userPoolClientId>''',
-    '''<id>''',
-    '''<env>''',
-    '''<min>''',
-    '''<max>''',
-    '''<short-sha>''',
-    '''<sha>''',
-    '''<hash>''',
-    '''<hex>''',
-    '''<token>''',
-    # Documented example domains used throughout designs
-    '''d-prod\.cloudfront\.net''',
-    '''d-dev\.cloudfront\.net''',
-    '''d-<[a-z]+(-[a-z]+)?>\.cloudfront\.net''',
-    '''d1234[a-z0-9]*\.cloudfront\.net''',
-    '''d111111abcdef8\.cloudfront\.net''',
-    # AWS canonical fake account ID
-    '''123456789012''',
-    # AWS canonical regions in docs
-    '''us-east-1''',
-    '''ap-south-1''',
-    # Cognito issuer placeholder
-    '''cognito-idp\.[a-z0-9-]+\.amazonaws\.com/<[^>]+>''',
-    '''cognito-idp\.[a-z0-9-]+\.amazonaws\.com/\$\{[^}]+\}''',
-]
+description = "Docs-only allowlist for design references"
 paths = [
-    # Design docs and project guidelines may reference example URLs/IDs/ARNs
     '''^specs/.*\.md$''',
     '''^CLAUDE\.md$''',
     '''^README\.md$''',
-    # gitleaks own config self-references
     '''^\.gitleaks\.toml$''',
 ]
