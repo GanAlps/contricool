@@ -30,6 +30,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      # The API Lambda image is arm64 but GitHub-hosted runners are x86_64.
+      # qemu provides binfmt_misc emulation so ``RUN`` steps inside the
+      # arm64 base image can execute. buildx is the modern docker build
+      # frontend that respects ``--platform=linux/arm64``.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
       - name: Install AWS CDK
         run: npm install -g aws-cdk
       - name: Install infra deps
@@ -136,6 +142,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      # arm64 cross-build emulation; same rationale as deploy-dev. CDK
+      # asset hash is content-addressed, so prod's image is reused from
+      # ECR without a second build — but buildx still needs to be
+      # available on the runner for the publish-asset path.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
       - name: Install AWS CDK
         run: npm install -g aws-cdk
       - name: Install infra deps
