@@ -6,7 +6,6 @@ on:
   push:
     branches: [main]
 
-# Cancel superseded runs to save Actions minutes.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -14,6 +13,7 @@ concurrency:
 permissions:
   contents: read
   pull-requests: read
+  id-token: write   # for cdk-diff job's OIDC role assumption
 
 jobs:
   gitleaks:
@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history so gitleaks scans everything
+          fetch-depth: 0
       - name: Install gitleaks
         run: |
           set -euo pipefail
@@ -40,29 +40,96 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Lint placeholder
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install API + infra dev deps
         run: |
-          echo "Lint job is a no-op until source code lands."
-          echo "Phase 1+: ruff + mypy on apps/api and apps/infra; biome + tsc on apps/client and packages/*."
+          set -euo pipefail
+          pip install --upgrade pip
+          pip install -e 'apps/api[dev]'
+          pip install -e 'apps/infra[dev]'
+      - name: ruff check (apps/api)
+        run: ruff check apps/api
+      - name: ruff check (apps/infra)
+        run: ruff check apps/infra
+      - name: mypy (apps/api)
+        run: mypy apps/api/app
+      - name: mypy (apps/infra)
+        # CDK constructs use jsii-generated types that don't satisfy
+        # mypy --strict cleanly; we run non-strict here and tighten as we
+        # add our own modules.
+        run: mypy --no-strict-optional --ignore-missing-imports apps/infra/stacks apps/infra/aspects apps/infra/app.py
 
   test:
     name: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Test placeholder
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install API dev deps
         run: |
-          echo "Test job is a no-op until source code lands."
-          echo "Phase 1+: pytest --cov-fail-under=99 on apps/api; vitest on apps/client."
+          set -euo pipefail
+          pip install --upgrade pip
+          pip install -e 'apps/api[dev]'
+      - name: Run API tests with coverage floor
+        working-directory: apps/api
+        run: pytest --cov=app --cov-report=term-missing --cov-fail-under=99
+      - name: Install infra dev deps
+        run: pip install -e 'apps/infra[dev]'
+      - name: Run infra tests
+        working-directory: apps/infra
+        run: pytest
 
   cdk-diff:
     name: cdk-diff
     runs-on: ubuntu-latest
+    # cdk-diff needs the PR-readonly OIDC role to look up deployed stack
+    # state. On main pushes (post-merge) this job becomes a no-op since the
+    # source of truth is what gets deployed by deploy.yml.
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
-      - name: cdk diff placeholder
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install AWS CDK
+        run: npm install -g aws-cdk
+      - name: Install infra deps
+        run: pip install -e 'apps/infra[dev]'
+      - name: Configure AWS credentials (PR-readonly via OIDC)
+        if: vars.AWS_DEPLOY_ROLE_PR_RO != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_PR_RO }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: cdk synth
+        if: vars.AWS_DEPLOY_ROLE_PR_RO != ''
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          CDK_DEFAULT_REGION: ${{ vars.AWS_REGION }}
+          CONTRICOOL_ALERTS_EMAIL: synth-only@example.invalid
+        working-directory: apps/infra
+        run: cdk synth
+      - name: cdk diff (informational; non-blocking)
+        if: vars.AWS_DEPLOY_ROLE_PR_RO != ''
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          CDK_DEFAULT_REGION: ${{ vars.AWS_REGION }}
+          CONTRICOOL_ALERTS_EMAIL: synth-only@example.invalid
+        working-directory: apps/infra
+        run: cdk diff --fail false || true
+      - name: Note on first PR (no role yet)
+        if: vars.AWS_DEPLOY_ROLE_PR_RO == ''
         run: |
-          echo "cdk-diff is a no-op until apps/infra lands in Phase 1."
+          echo "AWS_DEPLOY_ROLE_PR_RO repo variable not yet set."
+          echo "This is expected before the first run of specs/runbooks/first-deploy.md."
+          echo "Skipping cdk-diff this run; rerun the job after the runbook."
 
   openapi-check:
     name: openapi-check
@@ -71,4 +138,4 @@ jobs:
       - uses: actions/checkout@v4
       - name: openapi-check placeholder
         run: |
-          echo "openapi-check is a no-op until apps/api lands in Phase 2."
+          echo "openapi-check is a no-op until apps/api adds Pydantic models in Phase 2."

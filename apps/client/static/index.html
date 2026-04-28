@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>ContriCool — coming soon</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --fg: #0f172a;
+      --muted: #64748b;
+      --accent: #2563eb;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0f172a; --fg: #f8fafc; --muted: #94a3b8; --accent: #60a5fa; }
+    }
+    html, body { background: var(--bg); color: var(--fg); }
+    body {
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      max-width: 36rem;
+      margin: 4rem auto;
+      padding: 1.5rem;
+      line-height: 1.6;
+    }
+    h1 { font-weight: 700; font-size: 2rem; letter-spacing: -0.01em; }
+    p { color: var(--muted); }
+    a { color: var(--accent); }
+    code { background: rgba(127,127,127,0.15); padding: 0.1em 0.4em; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>ContriCool</h1>
+  <p>A simpler Splitwise — track shared transactions with friends. Currently under construction.</p>
+  <p>If you're reading this directly, the API is reachable at <code>/v1/health</code>.</p>
+  <p>Source: <a href="https://github.com/GanAlps/contricool">github.com/GanAlps/contricool</a></p>
+</body>
+</html>
