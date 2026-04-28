@@ -6,8 +6,11 @@ Creates the FastAPI Lambda + API Gateway HTTP API for an environment.
   with the AWS Lambda Web Adapter forwarding API Gateway events to a
   ``uvicorn`` process listening on port 8080 inside the container.
 - Lambda has reserved concurrency 100 (red-line 2 cost guardrail).
-- SnapStart is enabled on published versions; a ``live`` alias points to the
-  latest published version.
+- ``snapstart`` constructor parameter is wired but is **off** at MVP:
+  AWS Lambda does not support SnapStart on container-image functions
+  (only zip-packaged Java/Python/.NET). The stack still publishes a
+  ``Version`` and ``live`` ``Alias`` for blue/green-style alias-shift
+  rollback, since those are independent of SnapStart.
 - API Gateway HTTP API has a single catch-all route forwarding to the alias.
 - Permissive CORS at API Gateway is fine because the public surface is
   same-origin via CloudFront (Design 9); strict CORS is enforced at the
@@ -119,8 +122,12 @@ class ApiStack(Stack):
             description=f"X-Ray sampling rate for {env_name} (informational)",
         )
 
-        # SnapStart — applied via CFN property override (CDK L2 doesn't yet
-        # expose snap_start uniformly across all docker-image runtimes).
+        # SnapStart — kept gated behind ``snapstart`` so this code stays
+        # ready for the day AWS adds container-image support (or we switch
+        # to a zip-packaged Lambda). Today setting this to True yields a
+        # CFN ``CREATE_FAILED`` with
+        # "ContainerImage is not supported for SnapStart enabled functions".
+        # ``app.py`` forces ``snapstart=False`` for both envs at MVP.
         if snapstart:
             cfn_function = self.lambda_function.node.default_child
             assert isinstance(cfn_function, cdk.CfnResource)
