@@ -75,8 +75,8 @@ When ready, configuration:
 - **Originating identity**:
   - **US**: 10DLC long code (~$1/mo + per-message fees) — register via SNS Origination Numbers console. **Required** post-Aug 2023 to send to US numbers reliably.
   - **India**: Sender ID `CONTRICOOL` registered via DLT (TRAI). Without DLT, delivery is unreliable. **Document this risk and start DLT registration in parallel with implementation.**
-- **Spend cap**: SNS account-level monthly spend limit set to **$20/mo**. Above cap, deliveries are paused.
-- **Region**: SNS SMS is regional; we use us-east-1 for US, switch to ap-south-1 SNS endpoint for India (dual-region SMS sender) once DLT clears. Cognito's "SNS region" can only be one — pick `us-east-1` for MVP, India delivery via SNS cross-region. (Cognito's SMS via SNS in `us-east-1` does deliver globally; the choice of region affects only the sender-ID configuration.)
+- **Spend cap**: SNS account-level monthly spend limit set to **$5/mo** at MVP. Above cap, deliveries are paused. Raise via Service Quotas once real volume justifies; do **not** raise pre-emptively.
+- **Region**: SNS SMS is regional; we use us-west-2 for US, switch to ap-south-1 SNS endpoint for India (dual-region SMS sender) once DLT clears. Cognito's "SNS region" can only be one — pick `us-west-2` for MVP, India delivery via SNS cross-region. (Cognito's SMS via SNS in `us-west-2` does deliver globally; the choice of region affects only the sender-ID configuration.)
 - **Logging**: SNS SMS delivery logs to CloudWatch (success/failure metric per send) — enable in account preferences.
 
 ### Push (deferred)
@@ -219,4 +219,4 @@ Within budget; SMS is the only meaningful spend.
 - **India SMS delivery** contingent on **DLT registration** (start in parallel with implementation).
 - **Transactional only**, ever — no marketing, no in-app inbox at MVP, no push until mobile lands.
 - **Layered opt-out**: SES account suppression for bounces/complaints (post-domain), plus per-event DDB suppression in **`ContriCool-Users-<env>`** for non-essential events.
-- **Rate limits at the API layer** keep SMS spend predictable; **SNS account-level $20 cap** is the hard ceiling.
+- **Rate limits at the API layer** keep SMS spend predictable; **SNS account-level $5 cap** is the hard ceiling at MVP.

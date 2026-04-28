@@ -199,7 +199,7 @@ The single biggest accidental-leak risk. Belt-and-suspenders:
 
 ## Cross-border data transfer
 
-- **All data resident in us-east-1** (USA). India users' data leaves India.
+- **All data resident in us-west-2** (USA). India users' data leaves India.
 - **Notice in privacy policy**: "Data is stored in the United States."
 - **DPDP Act 2023** allows cross-border transfer except to government-blacklisted jurisdictions (none affecting us). Compliant.
 - If the user expands to EU later, we'd need EU SCCs and possibly multi-region — out of scope for MVP.
@@ -245,5 +245,5 @@ DPDP/CCPA SLAs (typically 30–45 days) are massively beat by self-service.
 - **Two-stage account delete** (deactivate → 30-day grace → hard-delete) with **anonymize-but-keep** for shared transactions, preserving other users' balance history while erasing the deleted user's identity.
 - **HMAC-SHA-256 lookup hashes** for email/phone (raw PII never indexed); **identical 202 response** to friend-request prevents enumeration.
 - **KMS CMK encrypts DDB + CloudWatch Logs + SSM PII salt**; **TLS 1.2+ everywhere**; logging denylist + pre-merge CI grep block accidental PII writes.
-- **CCPA + India DPDP-Act-aligned**: self-service export (`GET /v1/me/export`), correction (`PATCH /v1/me`), deletion (`DELETE /v1/me`); privacy policy + grievance officer published before launch; data resident in us-east-1.
+- **CCPA + India DPDP-Act-aligned**: self-service export (`GET /v1/me/export`), correction (`PATCH /v1/me`), deletion (`DELETE /v1/me`); privacy policy + grievance officer published before launch; data resident in us-west-2.
 - **Retention caps everywhere** (logs 14d, soft-deletes 30d, audits 90d, OTP rate-limit 24h via TTL) keep the blast radius of any incident contained.

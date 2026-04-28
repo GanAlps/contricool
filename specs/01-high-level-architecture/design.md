@@ -14,7 +14,7 @@ flowchart LR
         Android[Future Android app<br/>Expo + React Native]
     end
 
-    subgraph AWS[AWS us-east-1 + global edge — single account]
+    subgraph AWS[AWS us-west-2 + global edge — single account]
         subgraph SharedEdge[CloudFront — one distribution per env]
             CF[CloudFront<br/>d-prod.cloudfront.net<br/>d-dev.cloudfront.net]
         end
@@ -152,7 +152,7 @@ sequenceDiagram
 
 ### Topology
 
-- **Single AWS region: us-east-1.** ACM certs for CloudFront must originate here, lowest service prices, broadest service availability, lowest latency to US users; India users hit nearby CloudFront edge POPs (Mumbai, Chennai, Hyderabad) for static assets. API requests still cross to us-east-1 (~250–300ms RTT from India) — acceptable for <1k DAU MVP. Re-evaluate at >5k DAU India.
+- **Single AWS region: us-west-2.** ACM certs for CloudFront must originate here, lowest service prices, broadest service availability, lowest latency to US users; India users hit nearby CloudFront edge POPs (Mumbai, Chennai, Hyderabad) for static assets. API requests still cross to us-west-2 (~250–300ms RTT from India) — acceptable for <1k DAU MVP. Re-evaluate at >5k DAU India.
 - **No VPC.** Lambda runs outside VPC (DDB, Cognito, SES, SNS are all AWS public endpoints over IAM). Avoids NAT Gateway (~$32/mo) and ENI-attach cold-start penalty.
 - **Single AWS account** containing both `dev` and `prod` resources, separated by:
   - CDK stack-name prefix (`Contricool-Dev-*` vs `Contricool-Prod-*`).
@@ -203,7 +203,7 @@ All comfortably inside Lambda + DDB free tier (1M req + 25 RCU/WCU/mo per table)
 | Lambda cold start | +200–400ms first request after idle (with SnapStart) | Accept. Provisioned concurrency adds cost; revisit at >1k DAU. |
 | DDB throttle | 5xx briefly | On-demand auto-scales; Lambda retries with exponential backoff. |
 | SES sandbox limit | Cognito-managed sender unaffected; outbound app emails (friend invites) deferred until custom domain. | Defer SES production access until domain. |
-| SNS SMS spend overrun | Bill shock | SNS account-level monthly spend cap = $20. Alarm at 80%. |
+| SNS SMS spend overrun | Bill shock | SNS account-level monthly spend cap = $5 at MVP. Alarm at 80% ($4). |
 | Single-region outage | Site down | Accept for MVP. |
 | Bad deploy | Site broken | CFN auto-rollback; CDK redeploy with previous image tag if needed. |
 
@@ -292,7 +292,7 @@ When `contricool.com` is registered, we attach it as an alternate domain name + 
 - **Logs**: CloudWatch log groups encrypted with the same CMK; PII (email, phone, password, codes) never logged in cleartext — Powertools Logger denylist.
 - **Least privilege IAM**: Lambda execution role gets only the specific table ARNs (Users + Transactions), Cognito admin actions on the one user pool, and SES/SNS publish to specific identities/topics. Per-env roles can only reach `*-<env>` resources.
 - **No public DDB / S3**: web S3 bucket is private, served via CloudFront OAC only.
-- **Account-level guardrails**: AWS Budget alerts at $20 (warn) and $30 (critical); SNS SMS spend cap $20; CloudTrail enabled in all regions.
+- **Account-level guardrails**: AWS Budget alerts at $20 (warn) and $30 (critical) on account total; SNS SMS spend cap $5 at MVP; CloudTrail enabled in all regions.
 - **Single-account isolation discipline**: every resource carries `env=dev|prod` tag; CDK conventions and code review enforce that no execution role can touch resources outside its env.
 
 ## Open Questions
@@ -308,4 +308,4 @@ When `contricool.com` is registered, we attach it as an alternate domain name + 
 - **Single CloudFront distribution per env** routes path-based to S3 (web) and API Gateway (API), giving same-origin cookie scoping and unblocking MVP launch on the **free default `cloudfront.net` domain** until `contricool.com` is registered.
 - **Single AWS account** with strict resource-prefix + IAM scoping isolating `dev` from `prod`; one CDK app deploys both.
 - **Cognito User Pool** owns identity (email + phone, both verified); web/iOS/Android each get their own app client but share users.
-- **us-east-1 only, no VPC, free-tier-first** — every choice optimized to stay under $30/mo at <1k DAU; cost projection $3–8/mo through month 12.
+- **us-west-2 only, no VPC, free-tier-first** — every choice optimized to stay under $30/mo at <1k DAU; cost projection $3–8/mo through month 12.

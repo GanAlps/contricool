@@ -2,7 +2,7 @@
 
 ## Overview
 
-This design pins down where every piece of ContriCool runs in AWS, the IaC layout, environment topology, capacity assumptions, and a 12-month cost projection. Design level: **System** (deployment topology, scale targets, failure modes, cost). Headlines: **single AWS account, single region us-east-1, no VPC, two CDK-managed environments (`dev`, `prod`)** isolated by resource-name prefix and IAM scope; **Lambda + API Gateway HTTP API + two DynamoDB tables + S3 + one CloudFront distribution per env**; **AWS-default `cloudfront.net` domain at MVP** with a clean upgrade path to `contricool.com`; **CloudWatch logs and metrics enabled in both envs** so local-feeling fast debugging is the default. Total projected spend: **~$1–4/mo for first 6 months, $4–20/mo through month 12**, well under the $30 ceiling.
+This design pins down where every piece of ContriCool runs in AWS, the IaC layout, environment topology, capacity assumptions, and a 12-month cost projection. Design level: **System** (deployment topology, scale targets, failure modes, cost). Headlines: **single AWS account, primary region us-west-2, no VPC, two CDK-managed environments (`dev`, `prod`)** isolated by resource-name prefix and IAM scope; **Lambda + API Gateway HTTP API + two DynamoDB tables + S3 + one CloudFront distribution per env**; **AWS-default `cloudfront.net` domain at MVP** with a clean upgrade path to `contricool.com`; **CloudWatch logs and metrics enabled in both envs** so local-feeling fast debugging is the default. The only resource that lives outside us-west-2 is the post-domain ACM cert for CloudFront, which AWS requires to be in us-east-1 (a hard service constraint, not a design choice). Total projected spend: **~$1–4/mo for first 6 months, $4–20/mo through month 12**, well under the $30 ceiling.
 
 ## System Design
 
@@ -11,7 +11,7 @@ This design pins down where every piece of ContriCool runs in AWS, the IaC layou
 ```mermaid
 flowchart TB
     subgraph Account[Single AWS Account]
-        subgraph US[Region: us-east-1]
+        subgraph US[Region: us-west-2]
             subgraph ProdStack[Stacks: Contricool-Prod-*]
                 ProdLambda[Lambda<br/>contricool-api-prod<br/>arm64 + LWA + SnapStart]
                 ProdAPI[API Gateway HTTP API<br/>contricool-api-prod]
@@ -34,7 +34,7 @@ flowchart TB
                 DevLogs[(CloudWatch Logs<br/>14d retention)]
             end
             subgraph Shared[Stack: Contricool-Shared]
-                Budget[AWS Budgets<br/>$20 warn / $30 crit]
+                Budget[AWS Budgets<br/>$20 warn / $30 crit<br/>+ SNS SMS cap $5]
                 CT[CloudTrail<br/>multi-region]
                 IAMOIDC[IAM OIDC<br/>GitHub Actions]
             end
@@ -58,7 +58,9 @@ flowchart TB
 
 Trade-offs accepted vs separate accounts: an IAM mistake could cross envs (mitigated by strict CDK conventions, code review, and quarterly IAM Access Analyzer review); root-account compromise hits both; per-env billing requires tag-filtered reports rather than account-level totals.
 
-**Region** — **us-east-1**. ACM certs for CloudFront must originate here, lowest service prices, broadest service availability, lowest latency to US users; India users hit nearby CloudFront edge POPs (Mumbai, Chennai, Hyderabad) for static assets. API requests cross to us-east-1 (~250–300ms RTT from India) — acceptable for <1k DAU MVP.
+**Primary region** — **us-west-2** (Oregon). All operational resources (Lambda, DynamoDB, API Gateway, Cognito, S3, SES, SNS, CloudWatch, KMS) live here. India users hit nearby CloudFront edge POPs (Mumbai, Chennai, Hyderabad) for static assets; API requests still cross to us-west-2 (~280–330ms RTT from India, ~70–90ms RTT from US West Coast, ~80–100ms from US East Coast) — acceptable for <1k DAU MVP.
+
+**Special exception — us-east-1 for CloudFront ACM certs**: AWS requires every CloudFront-attached ACM certificate to be issued in us-east-1, no exceptions. When we register `contricool.com` (Phase 7), we'll bootstrap CDK in us-east-1 as well and add a thin "edge-cert" stack there that issues the cert and exports its ARN; the main edge stack in us-west-2 references that ARN by SSM cross-region parameter. Until the custom domain is registered, no us-east-1 resource exists at all — MVP is purely us-west-2.
 
 **No VPC at MVP.** Lambda runs outside a VPC and talks to AWS service endpoints over IAM. Avoids NAT Gateway (~$32/mo each) and ENI-attach cold-start penalty.
 
@@ -132,7 +134,7 @@ Cross-table atomicity for "create transaction" (verify friendship in Users + wri
 - **Single CloudFront distribution per env** at the AWS-default `d-<id>.cloudfront.net` domain. Free TLS via the AWS-default cert. Free tier: 1 TB egress + 10M req/mo for first 12 months. PriceClass_100 (US, Canada, Europe) at MVP — India users still hit nearby edges via the global fabric.
 - **No Route 53 hosted zone, no ACM cert, no domain registration at MVP** — saves ~$0.50/mo + ~$12/yr until `contricool.com` arrives.
 - **SES** — production access deferred until custom domain. At MVP, Cognito's managed sender (`no-reply@verificationemail.com`) handles email verification. App-originated emails (friend invites) deferred until domain.
-- **SNS SMS** for OTP (Cognito → SNS): NOT free. ~$0.00645/SMS in US, ~$0.04/SMS in India. With <1k DAU and OTP-on-signup-only, expect <$2/mo. Account-level monthly spend cap = $20.
+- **SNS SMS** for OTP (Cognito → SNS): NOT free. ~$0.00645/SMS in US, ~$0.04/SMS in India. With <1k DAU and OTP-on-signup-only, expect <$2/mo. Account-level monthly spend cap = **$5** at MVP (raise via Service Quotas once volume justifies).
 - **KMS**: $1/CMK/mo + tiny request fees. **One CMK in prod**, AWS-managed key in dev.
 - **CloudWatch Logs**: 5 GB/mo ingest free always; thereafter $0.50/GB ingest + $0.03/GB-mo storage. Both envs use 14-day retention so the dev can query recent dev/prod logs side-by-side during debugging.
 
@@ -184,7 +186,7 @@ Cost of dev observability: ~$0.50–1/mo (CloudWatch Logs ingest + a handful of 
 Hard guardrails:
 - AWS Budget alert at $20 (warn) and $30 (critical) per month, filtered by `app=contricool` tag.
 - Per-env Budget alarms via tag filter (`env=dev` and `env=prod`).
-- SNS SMS account spend limit: $20/mo.
+- SNS SMS account spend limit: $5/mo at MVP.
 - CloudWatch Logs: 14-day retention enforced via CDK.
 
 ### Failure Modes & Recovery
@@ -286,7 +288,7 @@ PROD = {
 ### Future state (after `contricool.com` registered)
 
 - Add Route 53 hosted zone (~$0.50/mo).
-- Issue ACM cert for `contricool.com` + `*.contricool.com` in us-east-1 (free).
+- Issue ACM cert for `contricool.com` + `*.contricool.com` in **us-east-1** (mandatory for CloudFront; free). All other resources stay in us-west-2.
 - Attach `contricool.com` and `www.contricool.com` as alternate domain names on the prod CloudFront distribution.
 - Attach `dev.contricool.com` on the dev distribution.
 - App config flips `VITE_API_URL` (or rather, since web and API are same-origin, no app change needed at all).
@@ -301,8 +303,8 @@ Detailed CORS, WAF, throttling in [Design 9 — Endpoint & Edge].
 - **All S3 buckets** `BlockPublicAccess.BLOCK_ALL`; web bucket served exclusively via CloudFront OAC.
 - **Least-privilege IAM**: Lambda execution roles get only specific resource ARNs; no `*` actions.
 - **CloudTrail** enabled in management/shared stack with logs to a dedicated audit bucket; 90-day retention.
-- **AWS Budgets** at $20 / $30; tag-filtered per-env breakdown.
-- **SNS SMS spend limit**: $20/mo.
+- **AWS Budgets** at $20 / $30 (account total); tag-filtered per-env breakdown.
+- **SNS SMS spend limit**: $5/mo at MVP.
 - **Root account**: hardware MFA, no programmatic keys, no day-to-day use; IAM Identity Center (free) for normal admin.
 - **Default CloudFront cert** (TLSv1.2_2021 minimum, HTTP redirects to HTTPS) at MVP; ACM cert when domain arrives.
 
@@ -314,8 +316,8 @@ Detailed CORS, WAF, throttling in [Design 9 — Endpoint & Edge].
 
 ## Summary
 
-- **Single AWS account, single region (us-east-1), no VPC**, two CDK stack-sets (`Contricool-Dev-*`, `Contricool-Prod-*`) plus `Contricool-Shared`; isolation by resource-name prefix + IAM scope + cost-allocation tags.
+- **Single AWS account, primary region us-west-2 (with us-east-1 used only for CloudFront ACM certs once a custom domain lands), no VPC**, two CDK stack-sets (`Contricool-Dev-*`, `Contricool-Prod-*`) plus `Contricool-Shared`; isolation by resource-name prefix + IAM scope + cost-allocation tags.
 - **Lambda (arm64, container image, AWS Lambda Web Adapter, SnapStart) + API Gateway HTTP API + two DynamoDB tables (`Users`, `Transactions`, on-demand) + S3 + one CloudFront distribution per env** at the AWS-default `cloudfront.net` domain; everything scales to zero or has a generous free tier.
 - **CloudWatch Logs + Metrics + X-Ray enabled in both envs** (dev at 100% trace sampling for fast debugging, 14-day retention everywhere) — observability isn't a prod-only luxury.
-- **Projected cost: $2–8/mo for first 12 months**, $10–20/mo afterward at <1k DAU; AWS Budgets enforce $20/$30 alerts, SNS SMS hard-capped at $20/mo.
+- **Projected cost: $2–8/mo for first 12 months**, $10–20/mo afterward at <1k DAU; AWS Budgets enforce $20/$30 alerts (account total), SNS SMS hard-capped at $5/mo at MVP.
 - **AWS CDK in Python** is the IaC, organized into shared/data/auth/api/web/edge/monitoring stacks per environment.

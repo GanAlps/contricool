@@ -191,7 +191,8 @@ Dimensions: `env` (`prod`|`dev`), `route` (e.g. `POST /v1/transactions`), `statu
 | SES bounce rate | `Bounce` / `Send` | > 5% | 1 day | P2 |
 | SES complaint rate | `Complaint` / `Send` | > 0.1% | 1 day | **P1** (deliverability risk) |
 | SNS SMS spend MTD | `SMSMonthToDateSpentUSD` | > $15 | 1 datapoint | P2 |
-| AWS Budget | Budget alarm | $20 (warn), $30 (critical) | monthly | P2 / **P1** |
+| AWS Budget (account total) | Budget alarm | $20 (warn), $30 (critical) | monthly | P2 / **P1** |
+| SNS SMS MTD spend | `SMSMonthToDateSpentUSD` | > $4 (80% of $5 cap) | 1 datapoint | **P1** (one-step shy of being shut off) |
 | CloudFront 5xx | CF `5xxErrorRate` | > 1% | 10 min | P2 |
 
 P1 alarms ring SMS + email. P2/P3 email only.

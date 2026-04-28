@@ -45,7 +45,7 @@ The repository is **public**. Treat every commit as a press release.
 2. `gitleaks` runs as a pre-commit hook (via `lefthook`) — blocks the commit on detection of high-entropy strings, AWS key patterns, JWT shapes, etc.
 3. `gitleaks` runs again in CI — blocks the merge.
 4. GitHub repo-level **secret scanning + push protection** enabled (free for public repos).
-5. **Hand-rolled grep guard in CI**: blocks any string matching `cloudfront\.net`, `execute-api\.us-east-1`, `cognito-idp\.us-east-1`, raw 12-digit AWS account IDs, etc.
+5. **Hand-rolled grep guard in CI**: blocks any string matching `cloudfront\.net`, `*.execute-api.<region>.amazonaws.com`, `cognito-idp.<region>.amazonaws.com/<pool-id>`, raw 12-digit AWS account IDs in ARN context, etc. (See `.gitleaks.toml` for the exact rules — region-agnostic.)
 6. Code review (self-review for solo): if you see a hardcoded URL, table name, or ID in a PR, kick it back.
 
 **If a secret is ever committed**, even momentarily: **rotate it immediately**, force-push is not enough, the value is permanently in git history. Then file an issue documenting the incident.
@@ -59,7 +59,7 @@ The following are not aspirational; they ship with the first CDK deploy:
 | Guardrail | Where enforced |
 |---|---|
 | AWS Budget alert at $20 (warn) and $30 (critical) | CDK `Contricool-Shared` stack, tag-filtered per-env |
-| SNS SMS account-level monthly spend cap of **$20** | CDK custom resource setting `MonthlySpendLimit` on `set-sms-attributes` |
+| SNS SMS account-level monthly spend cap of **$5** | CDK custom resource setting `MonthlySpendLimit` on `set-sms-attributes` (raise via Service Quotas request once volume justifies it) |
 | Lambda **reserved concurrency = 100** on `contricool-api-<env>` | CDK Lambda function config |
 | API Gateway **per-route throttling** for `/v1/auth/*`, `/v1/friends/request`, `/v1/auth/login` | CDK API Gateway HTTP API route settings |
 | API Gateway **stage-level throttling** at 5,000 RPS / 10,000 burst | CDK stage default |
@@ -69,7 +69,7 @@ The following are not aspirational; they ship with the first CDK deploy:
 | WAF rate-based rule (2000 req/5min/IP → block 10min) | CDK feature-flagged; **enabled at first sign of abuse**, not deferred indefinitely |
 | CloudWatch alarm: SES bounce > 5% | CDK monitoring stack |
 | CloudWatch alarm: SES complaint > 0.1% | CDK monitoring stack |
-| CloudWatch alarm: SNS MTD spend > $15 | CDK monitoring stack |
+| CloudWatch alarm: SNS MTD spend > $4 (80% of cap) | CDK monitoring stack |
 | CloudWatch alarm: Lambda errors > 1% | CDK monitoring stack |
 | CloudWatch alarm: DDB throttles > 0 | CDK monitoring stack (per table) |
 | `S3 BlockPublicAccess.BLOCK_ALL` on every bucket | CDK Aspect — enforced across all buckets |
@@ -282,7 +282,7 @@ contricool/
 ## SECTION 8 — Cost Discipline (review monthly)
 
 - AWS Budgets dashboard: review the first of every month.
-- If MTD spend > $20, investigate **before** month-end. Common culprits:
+- If MTD spend > $20 (account total) or SNS SMS MTD > $4 (80% of the $5 SMS cap), investigate **before** month-end. Common culprits:
   - SNS SMS spend (check `SMSMonthToDateSpentUSD`).
   - CloudWatch Logs ingest (check log-group ingestion rates).
   - DDB on-demand requests (check ConsumedRCUs/WCUs).
