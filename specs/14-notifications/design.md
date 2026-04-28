@@ -2,7 +2,7 @@
 
 ## Overview
 
-ContriCool's MVP notifications are minimal — friend invites, account events, and OTP delivery. This design pins down channels, providers, templates, suppression, rate limits, and the path to push notifications when mobile lands. Design level: **HLD + LLD**. Headlines: at MVP, **email via the Cognito-managed sender** (no custom domain yet — see Designs 1, 4); **SNS direct SMS** for OTP only (Cognito-driven); **friend-invite emails are deferred until `contricool.com` is registered and SES production access is granted**; **no in-app inbox at MVP**, **no marketing channel ever** (transactional only); **opt-out via suppression list in `ContriCool-Users-<env>`** + SES account-level suppression once SES is in use; **future push via SNS Mobile Push or Pinpoint** when iOS/Android ships.
+ContriCool's MVP notifications are minimal — only Cognito-driven verification email + forgot-password email. This design pins down channels, providers, templates, suppression, rate limits, and the path to push notifications when mobile lands. Design level: **HLD + LLD**. Headlines: at MVP, **email via the Cognito-managed sender** (no custom domain yet — see Designs 1, 4); **no SMS at all** (phone verification dropped at MVP — see Design 4 / CONSTRAINTS.md; SMS pipeline reintroduced post-business-registration); **friend-invite emails are deferred until `contricool.com` is registered and SES production access is granted**; **no in-app inbox at MVP**, **no marketing channel ever** (transactional only); **opt-out via suppression list in `ContriCool-Users-<env>`** + SES account-level suppression once SES is in use; **future push via SNS Mobile Push or Pinpoint** when iOS/Android ships.
 
 ## Channels & events
 
@@ -13,9 +13,9 @@ At MVP (no custom domain, simplified friendship model — Design 6), only Cognit
 | Event | Channel | Trigger | Sender | MVP status |
 |---|---|---|---|---|
 | Email verification code (signup) | Email | `POST /v1/auth/signup` | **Cognito-managed sender** (`no-reply@verificationemail.com`) | **MVP: yes** |
-| Phone OTP (signup + resend) | SMS | `POST /v1/auth/signup`, `/resend-phone-code` | Cognito → SNS | **MVP: yes** |
 | Forgot-password code | Email | `POST /v1/auth/forgot-password` | Cognito-managed sender | **MVP: yes** |
 | Password changed | Email | Cognito password change | Cognito-managed sender | **MVP: yes** |
+| Phone OTP | SMS | (no longer applicable at MVP — phone verification dropped) | n/a | **MVP: not in scope** |
 | Friend added you (informational) | Email | `POST /v1/friends/add` (target is the recipient) | (post-domain) Our Lambda → SES | **MVP: deferred — friendship is created bilaterally and surfaced in the recipient's friend list on next refresh; no email at MVP** |
 | Account deletion confirmation | Email | `DELETE /v1/me` | (post-domain) Our Lambda → SES | **MVP: deferred (UI-only confirmation)** |
 | New device sign-in (post-MVP) | Email | Cognito advanced security | Cognito → SES | Post-MVP (requires Cognito Advanced Security $) |
@@ -24,6 +24,7 @@ At MVP (no custom domain, simplified friendship model — Design 6), only Cognit
 Notes:
 - Friend "request sent / accepted / declined" emails were dropped from this matrix when the friendship model was simplified (Design 6) — no accept/decline flow at MVP, so no notifications are needed.
 - Friend "invite to non-user" emails are also gone — the API returns 404 when the target isn't on the platform; users invite externally (WhatsApp, etc.) until the post-MVP invite flow lands.
+- **All SMS-driven events** (phone verification OTP, voice OTP fallback, future push-via-Pinpoint to phone) are out of scope at MVP — phone verification is reintroduced post-business-registration.
 
 When `contricool.com` is registered, the deferred events activate without code changes — `notification_channel` config flips from `cognito_managed` to `ses_with_domain`.
 
@@ -214,9 +215,8 @@ Within budget; SMS is the only meaningful spend.
 
 ## Summary
 
-- **At MVP**: only **Cognito-managed email sender** (verification, forgot-password, password-changed) and **SNS SMS** (OTP only). App-originated emails (friend invites, account-deletion confirmations) are deferred until `contricool.com` is registered and SES production access is granted.
+- **At MVP**: only **Cognito-managed email sender** (verification, forgot-password, password-changed). **No SMS at all** — phone verification is dropped at MVP (Design 4 / CONSTRAINTS.md); SMS pipeline reintroduced post-business-registration. App-originated emails (friend invites, account-deletion confirmations) are deferred until `contricool.com` is registered and SES production access is granted.
 - **Post-domain**: switch Cognito to a verified SES identity (`noreply@mail.contricool.com`) and activate the deferred event matrix; one sender domain `mail.contricool.com` with DKIM/SPF/DMARC.
-- **India SMS delivery** contingent on **DLT registration** (start in parallel with implementation).
 - **Transactional only**, ever — no marketing, no in-app inbox at MVP, no push until mobile lands.
 - **Layered opt-out**: SES account suppression for bounces/complaints (post-domain), plus per-event DDB suppression in **`ContriCool-Users-<env>`** for non-essential events.
-- **Rate limits at the API layer** keep SMS spend predictable; **SNS account-level $5 cap** is the hard ceiling at MVP.
+- **SNS SMS spend cap of $5/mo** stays as defense-in-depth even though no production code path publishes SMS at MVP.

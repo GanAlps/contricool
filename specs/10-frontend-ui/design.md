@@ -77,8 +77,8 @@ Expo Router handles routing on web (via History API) and native (via React Navig
 | Page | Route | Purpose |
 |---|---|---|
 | Login | `/login` | email + password; "forgot" link; "sign up" link |
-| Signup | `/signup` | email + phone + password + name + currency picker; CTA → /verify |
-| Verify | `/verify` | two boxes (email code, phone code) + resend buttons; redirect to /dashboard on both confirmed |
+| Signup | `/signup` | email + password + name + currency picker + **optional** phone field (with "(unverified)" hint); CTA → /verify |
+| Verify | `/verify` | one input for the email verification code + resend button; redirect to /dashboard on confirmation. (Phone is captured at signup as optional unverified metadata only — see Design 4 / CONSTRAINTS.md.) |
 | Forgot password | `/forgot-password` | email input → triggers reset code |
 | Reset password | `/reset-password?token=...` | new password + code; redirect to /login |
 | Dashboard | `/dashboard` | recent activity (last 10 tx), top owe-me / I-owe summaries, quick "Add expense" CTA |

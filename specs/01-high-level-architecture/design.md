@@ -85,28 +85,23 @@ When `contricool.com` is registered later, we attach it as an alternate domain n
 
 ### End-to-end Data Flows
 
-**Sign-up (email + phone, both verified)**
+**Sign-up (email-only verification at MVP; phone optional + unverified)**
 
 ```mermaid
 sequenceDiagram
     participant U as User (Web)
     participant CF as CloudFront
-    participant API as API Gateway → Lambda
+    participant API as API Gateway then Lambda
     participant Cog as Cognito
-    participant SES as SES (email)
-    participant SNS as SNS (SMS)
+    participant SES as Cognito-managed email sender
     U->>CF: POST /v1/auth/signup
     CF->>API: forward
-    API->>Cog: AdminCreateUser + custom attrs
-    Cog->>SES: verification email (Cognito-managed sender at MVP)
-    Cog->>SNS: SMS OTP
+    API->>Cog: SignUp + custom attrs (email, name, custom:user_id, optional phone)
+    Cog->>SES: verification email
     API-->>U: 202 Accepted (pending verification)
     U->>CF: POST /v1/auth/verify-email
     CF->>API: forward
     API->>Cog: ConfirmSignUp
-    U->>CF: POST /v1/auth/verify-phone
-    CF->>API: forward
-    API->>Cog: VerifyUserAttribute(phone)
     Cog-->>U: Account active
 ```
 
@@ -307,5 +302,5 @@ When `contricool.com` is registered, we attach it as an alternate domain name + 
 - **Modular monolith on Lambda + two DynamoDB tables** (`ContriCool-Users-*`, `ContriCool-Transactions-*`) behind API Gateway HTTP API, with **SnapStart** for cheap cold-start mitigation; same API for web today and mobile tomorrow.
 - **Single CloudFront distribution per env** routes path-based to S3 (web) and API Gateway (API), giving same-origin cookie scoping and unblocking MVP launch on the **free default `cloudfront.net` domain** until `contricool.com` is registered.
 - **Single AWS account** with strict resource-prefix + IAM scoping isolating `dev` from `prod`; one CDK app deploys both.
-- **Cognito User Pool** owns identity (email + phone, both verified); web/iOS/Android each get their own app client but share users.
+- **Cognito User Pool** owns identity (email required + verified at MVP; phone optional + unverified, never used for search/auth); web/iOS/Android each get their own app client but share users.
 - **us-west-2 only, no VPC, free-tier-first** — every choice optimized to stay under $30/mo at <1k DAU; cost projection $3–8/mo through month 12.

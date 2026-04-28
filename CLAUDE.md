@@ -63,7 +63,7 @@ The following are not aspirational; they ship with the first CDK deploy:
 | Lambda **reserved concurrency = 100** on `contricool-api-<env>` | CDK Lambda function config |
 | API Gateway **per-route throttling** for `/v1/auth/*`, `/v1/friends/request`, `/v1/auth/login` | CDK API Gateway HTTP API route settings |
 | API Gateway **stage-level throttling** at 5,000 RPS / 10,000 burst | CDK stage default |
-| Per-identity OTP rate limits (3/h, 10/day SMS; 5/h, 20/day email) | App-layer `rate_limit.py` writing to `ContriCool-Users` `RATE#<hash>` rows; **enforced before** calling Cognito |
+| Per-identity OTP rate limit on **email** (5/h, 20/day) | App-layer `rate_limit.py` writing to `ContriCool-Users` `AUTH_RATE#<hash>` rows; **enforced before** calling Cognito. SMS rate limit reintroduced post-business-registration (phone verification deferred at MVP per CONSTRAINTS.md / Design 4). |
 | Per-user friend-request rate limit (30/h) | App-layer rate-limit table |
 | Per-IP rate limit on `/v1/telemetry/error` (10/min/IP) | API Gateway throttling on the route |
 | WAF rate-based rule (2000 req/5min/IP → block 10min) | CDK feature-flagged; **enabled at first sign of abuse**, not deferred indefinitely |
@@ -97,12 +97,13 @@ Every authentication, authorization, and rate-limit rule has at least one **nega
 | **Non-creator edit** | user B (member) tries to PUT user A's transaction → 403 |
 | **Non-friend transaction creation** | user A creates txn including non-friend C → 422 |
 | **Stale-edit conflict** | edit with stale `If-Match` → 412 |
-| **Rate-limit hit** | 6th OTP request in an hour → 429 |
+| **Rate-limit hit** | 6th email-OTP request in an hour → 429 |
 | **Idempotency replay** | second POST with same key returns the cached response (not a new resource) |
 | **Currency mismatch** | create txn with currency != user's currency → 422 |
 | **Self-add friend** | add yourself as friend → 422 |
 | **Already-friends add** | add an existing friend → 409 |
-| **Non-existent friend add** | add an email/phone with no matching user → 404 USER_NOT_FOUND |
+| **Friend-add via phone identifier** | reject 400 `INVALID_IDENTIFIER` (email-only at MVP) |
+| **Non-existent friend add** | add an email with no matching user → 404 USER_NOT_FOUND |
 | **Cross-tenant data isolation** | user A's session never sees user B's data via any endpoint |
 | **PII not in response** | `GET /v1/friends/{id}` does not return friend's email or phone |
 | **Soft-deleted invisible** | `GET /v1/transactions/{id}` after delete → 404 |
@@ -129,7 +130,7 @@ These fixtures are part of the test foundation, not per-test boilerplate.
 
 Detailed designs live in `specs/`. The architecture in one paragraph:
 
-ContriCool is a Splitwise-lite app. **One Expo codebase** under `apps/client` ships to web today (S3 + CloudFront) and iOS/Android tomorrow (EAS Build). **One Lambda** under `apps/api` runs FastAPI on Python 3.12 arm64 via the AWS Lambda Web Adapter, with SnapStart enabled. **Two DynamoDB tables** — `ContriCool-Users-<env>` (3 GSIs covering email + phone lookup + friendship reverse) and `ContriCool-Transactions-<env>` (1 GSI covering user→txns). **Cognito User Pool** owns identity (email + phone, both verified). **One CloudFront distribution per env** routes `/v1/*` to API Gateway HTTP API, everything else to S3, all on the AWS-default `cloudfront.net` domain at MVP. Single AWS account, two CDK stack groups (`Contricool-Dev-*`, `Contricool-Prod-*`) isolated by resource-name prefix, IAM scope, and tags.
+ContriCool is a Splitwise-lite app. **One Expo codebase** under `apps/client` ships to web today (S3 + CloudFront) and iOS/Android tomorrow (EAS Build). **One Lambda** under `apps/api` runs FastAPI on Python 3.12 arm64 via the AWS Lambda Web Adapter, with SnapStart enabled. **Two DynamoDB tables** — `ContriCool-Users-<env>` (1 GSI: polymorphic email-hash + friendship reverse) and `ContriCool-Transactions-<env>` (1 GSI: user→txns). **Cognito User Pool** owns identity (email required + verified at MVP; phone is optional unverified metadata only). **One CloudFront distribution per env** routes `/v1/*` to API Gateway HTTP API, everything else to S3, all on the AWS-default `cloudfront.net` domain at MVP. Single AWS account in primary region us-west-2, two CDK stack groups (`Contricool-Dev-*`, `Contricool-Prod-*`) isolated by resource-name prefix, IAM scope, and tags.
 
 **Read these designs in order if you're new:**
 

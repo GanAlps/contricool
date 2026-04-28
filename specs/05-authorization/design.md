@@ -24,7 +24,7 @@ Three roles + resource ownership:
 | `User profile (self)` | update (name) | requester is the user |
 | `User profile (other)` | read public fields (display_name) | requester and target are friends |
 | `User profile (other)` | read email/phone | **never** (PII not exposed across users) |
-| `Friendship` | add (auto-bilateral) | requester signed-in; identifier (email or phone) matches an existing user; not already friends; target is not the requester |
+| `Friendship` | add (auto-bilateral) | requester signed-in; **email** identifier matches an existing user (phone is not a search key at MVP); not already friends; target is not the requester |
 | `Friendship` | remove | either party of an existing friendship (drops the row from both sides) |
 | `Transaction` | create | requester is in `members[]`; all other `members[]` are current friends of requester |
 | `Transaction` | read | requester is in `members[]` |
@@ -35,7 +35,7 @@ Three roles + resource ownership:
 Notes on the rules:
 - **Members can read; only creator can write.** Splitwise behavior diverges (any member can edit) — we choose creator-only for MVP simplicity and audit clarity.
 - **Friendship gates transactions.** Transactions can only be created among current friends to prevent random-stranger debt-spam. The add-transaction UI suggests only the requester's current friends.
-- **No accept/decline at MVP.** When user A enters user B's email or phone and B is on the platform, the friendship is created **bilaterally and immediately** — no pending state, no inbox, no approval. Both users instantly see each other in their friend list. The only abuse mitigation is that A must already know B's exact email or phone (no fuzzy search, no enumeration of suggestions).
+- **No accept/decline at MVP.** When user A enters user B's **email** and B is on the platform, the friendship is created **bilaterally and immediately** — no pending state, no inbox, no approval. Both users instantly see each other in their friend list. The only abuse mitigation is that A must already know B's exact email (no fuzzy search, no enumeration of suggestions). **Phone is not a friend-add identifier at MVP** — see Design 4 / CONSTRAINTS.md.
 - **No blocking at MVP.** Either party can `remove` a friendship at any time, which drops the row and stops new transactions involving the pair (existing transactions remain visible). Block/unblock is deferred.
 - **No invites for non-users at MVP.** If the supplied email/phone doesn't match any existing user, the API returns 404 `USER_NOT_FOUND`. The user-invite-flow (where A invites a not-yet-signed-up Bob via email) is deferred until `contricool.com` is registered and SES is in use.
 
@@ -143,8 +143,9 @@ Same pattern for `DELETE`. Soft-delete sets `deleted_at` with the same Condition
 
 | Scenario | Allowed? | Why |
 |---|---|---|
-| User A adds B by B's email; B exists on platform | Yes — bilateral friendship created immediately | no accept/decline at MVP; lookup-by-exact-identifier is the only abuse gate |
+| User A adds B by B's email; B exists on platform | Yes — bilateral friendship created immediately | no accept/decline at MVP; lookup-by-exact-email is the only abuse gate |
 | User A adds B by email; B does not exist on platform | No (404 `USER_NOT_FOUND`) | invites for non-users deferred to post-domain |
+| User A tries to add B by phone | No (400 `INVALID_IDENTIFIER`) | phone is not a search key at MVP |
 | User A creates a transaction including B; A and B are friends | Yes | both are members; A is creator |
 | User A creates a transaction including B and C; A&B friends, A&C not | No (403) | C is not a current friend of A |
 | User B (member, not creator) tries to edit | No (403) | only creator can edit |
