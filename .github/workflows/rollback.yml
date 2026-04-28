@@ -70,6 +70,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      # arm64 cross-build emulation — see comment in deploy.yml's
+      # deploy-dev / deploy-prod jobs.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
       - name: Install AWS CDK
         run: npm install -g aws-cdk
       - name: Install infra deps
