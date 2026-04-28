@@ -71,6 +71,7 @@ class ApiStack(Stack):
         snapstart: bool,
         log_retention_days: int,
         xray_sampling_rate: float,
+        reserved_concurrent_executions: int = 100,
         **kwargs: Any,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -100,7 +101,7 @@ class ApiStack(Stack):
             architecture=lambda_.Architecture.ARM_64,
             memory_size=512,
             timeout=Duration.seconds(10),
-            reserved_concurrent_executions=100,
+            reserved_concurrent_executions=reserved_concurrent_executions,
             environment={
                 "POWERTOOLS_SERVICE_NAME": "contricool-api",
                 "POWERTOOLS_LOG_LEVEL": "INFO",

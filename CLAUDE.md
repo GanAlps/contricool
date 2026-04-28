@@ -60,7 +60,7 @@ The following are not aspirational; they ship with the first CDK deploy:
 |---|---|
 | AWS Budget alert at $20 (warn) and $30 (critical) | CDK `Contricool-Shared` stack, tag-filtered per-env |
 | SNS SMS account-level monthly spend cap of **$5** | CDK custom resource setting `MonthlySpendLimit` on `set-sms-attributes` (raise via Service Quotas request once volume justifies it) |
-| Lambda **reserved concurrency = 100** on `contricool-api-<env>` | CDK Lambda function config |
+| Lambda **reserved concurrency** on `contricool-api-<env>` — `5` in dev (fits within new-account default Lambda Concurrent-Executions quota of 10; raise back toward 100 once the quota lands and traffic justifies it), `100` in prod | CDK Lambda function config (`apps/infra/app.py` `ENV_CONFIGS`) |
 | API Gateway **per-route throttling** for `/v1/auth/*`, `/v1/friends/request`, `/v1/auth/login` | CDK API Gateway HTTP API route settings |
 | API Gateway **stage-level throttling** at 5,000 RPS / 10,000 burst | CDK stage default |
 | Per-identity OTP rate limit on **email** (5/h, 20/day) | App-layer `rate_limit.py` writing to `ContriCool-Users` `AUTH_RATE#<hash>` rows; **enforced before** calling Cognito. SMS rate limit reintroduced post-business-registration (phone verification deferred at MVP per CONSTRAINTS.md / Design 4). |

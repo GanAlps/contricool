@@ -39,6 +39,7 @@ class _EnvConfig(TypedDict):
     xray_sampling_rate: float
     include_dashboard: bool
     snapstart: bool
+    api_reserved_concurrency: int
 
 ACCOUNT = os.environ.get("CDK_DEFAULT_ACCOUNT")
 REGION = os.environ.get("CDK_DEFAULT_REGION", "us-west-2")
@@ -61,7 +62,7 @@ cdk_env = cdk.Environment(account=ACCOUNT, region=REGION)
 
 # Per-environment configuration. Values are deliberate; see
 # specs/03-hosting-infrastructure/design.md.
-# NB: ``snapstart`` is forced off because AWS Lambda does not support
+# NB1: ``snapstart`` is forced off because AWS Lambda does not support
 # SnapStart on container-image functions (only zip-packaged Java/Python/.NET).
 # Our Phase 1b API ships as an arm64 container image (apps/api/Dockerfile +
 # AWS Lambda Web Adapter) so SnapStart is not available. Enabling the flag
@@ -69,7 +70,17 @@ cdk_env = cdk.Environment(account=ACCOUNT, region=REGION)
 # "ContainerImage is not supported for SnapStart enabled functions".
 # Re-enable once we either (a) switch to a zip-packaged Lambda or (b) AWS
 # adds container-image support. Cold-start tax for Python+FastAPI is
-# ~500-1500ms, acceptable for MVP traffic with reserved concurrency = 100.
+# ~500-1500ms, acceptable for MVP traffic with reserved concurrency.
+#
+# NB2: ``api_reserved_concurrency`` is 5 in dev (solo-dev traffic) and 100
+# in prod. Brand-new AWS accounts default to a Lambda Concurrent-Executions
+# account quota of 10, which makes reserved=100 unattainable on either env
+# until the quota is raised. Solo dev only ever runs one or two requests
+# at a time, so 5 is plenty and leaves 5 unreserved for CDK-internal
+# provider Lambdas (BucketDeployment, OIDC thumbprint, etc.). Prod stays
+# at 100 per CLAUDE.md red-line 2; the prod deploy gate will fail until
+# the account quota is raised, which is the right behaviour (forces the
+# operator to raise the quota before exposing prod traffic).
 ENV_CONFIGS: dict[str, _EnvConfig] = {
     "dev": {
         "pitr": False,
@@ -78,6 +89,7 @@ ENV_CONFIGS: dict[str, _EnvConfig] = {
         "xray_sampling_rate": 1.0,
         "include_dashboard": False,
         "snapstart": False,
+        "api_reserved_concurrency": 5,
     },
     "prod": {
         "pitr": True,
@@ -86,6 +98,7 @@ ENV_CONFIGS: dict[str, _EnvConfig] = {
         "xray_sampling_rate": 0.1,
         "include_dashboard": True,
         "snapstart": False,
+        "api_reserved_concurrency": 100,
     },
 }
 
@@ -111,6 +124,7 @@ for env_name, cfg in ENV_CONFIGS.items():
         snapstart=cfg["snapstart"],
         log_retention_days=cfg["log_retention_days"],
         xray_sampling_rate=cfg["xray_sampling_rate"],
+        reserved_concurrent_executions=cfg["api_reserved_concurrency"],
     )
 
     web = WebStack(
