@@ -151,13 +151,21 @@ class SharedStack(Stack):
             client_ids=["sts.amazonaws.com"],
         )
 
-        # 6. Deploy roles — scoped to specific GitHub refs / environments.
+        # 6. Deploy roles — scoped to specific GitHub Environments.
+        # Both dev and prod use ``:environment:<name>`` trust patterns;
+        # ``deploy.yml`` declares ``environment: dev`` on dev-side jobs and
+        # ``environment: prod`` on prod-side jobs, so GitHub's OIDC ``sub``
+        # claim takes the form ``repo:OWNER/REPO:environment:<env>`` (a
+        # ``ref:`` form is only emitted when the job has no ``environment``
+        # key). Main-branch-only enforcement comes from the workflow's
+        # ``on: push: branches: [main]`` trigger; the prod approval gate
+        # comes from the prod environment's required-reviewer rule.
         self.dev_deploy_role = self._make_deploy_role(
             "Contricool-CI-Dev-Deploy",
             oidc_provider,
-            sub_pattern=f"repo:{github_repo}:ref:refs/heads/main",
+            sub_pattern=f"repo:{github_repo}:environment:dev",
             stack_name_prefix="Contricool-Dev-",
-            description="GitHub Actions deploys to dev (main branch only)",
+            description="GitHub Actions deploys to dev (push to main + environment: dev)",
         )
         # NB: dev role intentionally has **no** CFN write permissions on
         # Contricool-Shared. Shared owns the prod role's trust policy, so a
