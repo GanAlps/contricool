@@ -165,7 +165,7 @@ Server is the source of truth: client sends raw inputs (method + per-member shar
 
 - **Friendship is undirected and binary**: it either exists or it doesn't. No `pending`, no `blocked` at MVP.
 - **Adding is bilateral and immediate**: when A adds B (where B exists on the platform), both A and B's friend lists immediately include each other — no inbox, no approval, no notification gating.
-- **The only access gate is exact-identifier lookup**: A must already know B's email or phone (E.164). No fuzzy search, no suggestions, no enumeration helpers.
+- **The only access gate is exact-email lookup**: A must already know B's email. No fuzzy search, no suggestions, no enumeration helpers. (Phone is not a search/add identifier at MVP — see Design 4 / CONSTRAINTS.md.)
 - **Removing is one-sided and immediate**: either party can remove the friendship; the row goes away from both sides. Historical transactions remain visible (preserves financial history) but no new transactions can be created with the removed party until friendship is re-added.
 
 ### Storage shape
@@ -183,11 +183,10 @@ sequenceDiagram
     participant CF as CloudFront
     participant API as API
     participant DDB as DDB ContriCool-Users
-    A->>CF: POST /v1/friends/add<br/>{identifier: "bob@x.com" or "+91987..."}
+    A->>CF: POST /v1/friends/add<br/>{identifier: "bob@x.com"}
     CF->>API: forward
-    API->>API: normalize (lowercase email / E.164 phone)
-    API->>API: validate not self-add
-    API->>DDB: lookup user by hashed identifier (GSI1)
+    API->>API: normalize (lowercase trim) + validate as email + not self-add
+    API->>DDB: lookup user by email-hash (GSI1 EMAIL#hash)
     alt user exists (B)
         API->>DDB: TransactWriteItems<br/>(check no existing friendship + Put new FRIENDSHIP row)
         DDB-->>API: ok (or 409 if already friends)

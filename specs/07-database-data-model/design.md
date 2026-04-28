@@ -2,7 +2,7 @@
 
 ## Overview
 
-This design picks the data store and the concrete schema. Design level: **System + LLD** (the access patterns drive the keys; the keys drive the access patterns — both must be specified). Headlines: **DynamoDB on-demand, two tables** — `ContriCool-Users-<env>` for the social graph + identity ops and `ContriCool-Transactions-<env>` for the financial ledger; both encrypted with the project KMS CMK in prod, PITR enabled in prod. **Three GSIs total** (2 on Users, 1 on Transactions) cover all access patterns. Email/phone lookups use **deterministic salted hashes** projected directly from the user `META` row so raw PII is never indexed and no row is duplicated. Cross-table atomicity preserved via `TransactWriteItems` (up to 100 items spanning multiple tables).
+This design picks the data store and the concrete schema. Design level: **System + LLD** (the access patterns drive the keys; the keys drive the access patterns — both must be specified). Headlines: **DynamoDB on-demand, two tables** — `ContriCool-Users-<env>` for the social graph + identity ops and `ContriCool-Transactions-<env>` for the financial ledger; both encrypted with the project KMS CMK in prod, PITR enabled in prod. **Two GSIs total** (1 on Users for email lookup + friend "user-is-max" view; 1 on Transactions for user→txns). **Email lookup uses a deterministic salted hash** projected directly from the user `META` row so raw PII is never indexed. **Phone is not in DDB at all** at MVP (lives only in Cognito as an optional unverified attribute — see Designs 4 and CONSTRAINTS.md). Cross-table atomicity preserved via `TransactWriteItems` (up to 100 items spanning multiple tables).
 
 ## Data Store Choice
 
@@ -23,7 +23,7 @@ Numbered for reference. Each lists the table + index that serves it.
 |---|---|---|---|
 | 1 | Get user profile by user_id | Users | base (PK = `USER#<id>`) |
 | 2 | Look up user by email | Users | GSI1 |
-| 3 | Look up user by phone | Users | GSI2 (dedicated phone-lookup index) |
+| 3 | ~~Look up user by phone~~ | n/a (phone-search is not a feature at MVP — see CONSTRAINTS.md / Design 4) | n/a |
 | 4 | Get friendship between (A, B) | Users | base (PK = `USER#<min>`) |
 | 5 | List all friendships for user | Users | base + GSI1 (union of "user is min" and "user is max") |
 | 6 | Get OTP rate-limit row | Users | base (PK = `RATE#<hash>`) |
@@ -38,32 +38,32 @@ Patterns previously assumed (pending friend requests, friend invites for non-use
 
 ## Table 1: `ContriCool-Users-<env>`
 
-**Keys**: `PK` / `SK` (string/string). **GSIs**: two — `GSI1` (email lookup + friend "user-is-max" view) and `GSI2` (phone lookup).
+**Keys**: `PK` / `SK` (string/string). **GSIs**: one — `GSI1` (polymorphic: email lookup + friend "user-is-max" view).
 
 ### Items
 
-| Entity | PK | SK | GSI1PK | GSI1SK | GSI2PK | GSI2SK | Attributes |
-|---|---|---|---|---|---|---|---|
-| **User** | `USER#<user_id>` | `META` | `EMAIL#<sha256(salt+lower(email))>` | `USER` | `PHONE#<sha256(salt+e164)>` | `USER` | display_name, currency, status, created_at, updated_at, deactivated_at? |
-| **Friendship** | `USER#<min(a,b)>` | `FRIEND#<max(a,b)>` | `USER#<max(a,b)>` | `FRIEND#<min(a,b)>` | — | — | created_by, created_at |
-| **OTP rate-limit** | `RATE#<sha256(salt+lower(identity))>` | `OTP#<channel>` | — | — | — | — | attempts_hour, hour_window_started_at, attempts_day, day_window_started_at, ttl |
+| Entity | PK | SK | GSI1PK | GSI1SK | Attributes |
+|---|---|---|---|---|---|
+| **User** | `USER#<user_id>` | `META` | `EMAIL#<sha256(salt+lower(email))>` | `USER` | display_name, currency, status, created_at, updated_at, deactivated_at? |
+| **Friendship** | `USER#<min(a,b)>` | `FRIEND#<max(a,b)>` | `USER#<max(a,b)>` | `FRIEND#<min(a,b)>` | created_by, created_at |
+| **OTP rate-limit** | `AUTH_RATE#<sha256(salt+lower(email))>` | `OTP#EMAIL` | — | — | attempts_hour, hour_window_started_at, attempts_day, day_window_started_at, ttl |
 
-### Indexes — what each one carries
+The OTP-rate-limit SK is `OTP#EMAIL` (only channel at MVP); shape stays forward-compatible for `OTP#SMS` when phone verification is reintroduced post-business-registration.
 
-**GSI1** (still polymorphic across two shapes, distinguished by prefix on `GSI1PK`):
+### What's NOT in DDB at MVP
+
+- **Phone number** (raw or hashed). Phone lives only in Cognito as an optional unverified attribute. No GSI2 on Users; no phone hash; no `LOOKUP#PHONE` pivot. Adding phone search later is a non-breaking forward change: introduce GSI2 on the table, write phone-hash to META rows on the next user touch, optionally backfill existing users. See CONSTRAINTS.md "Path to re-introduce phone verification."
+
+### Indexes — what GSI1 carries
+
+GSI1 is polymorphic across two shapes, distinguished by prefix on `GSI1PK`:
 
 | `GSI1PK` shape | Projecting item | Used for |
 |---|---|---|
 | `EMAIL#<hash>` | User `META` row | Pattern #2 — look up user by email |
 | `USER#<max>` | Friendship row | Pattern #5 — list friendships where the requester is the larger-id of the canonical pair |
 
-**GSI2** (single shape, single purpose):
-
-| `GSI2PK` shape | Projecting item | Used for |
-|---|---|---|
-| `PHONE#<hash>` | User `META` row | Pattern #3 — look up user by phone |
-
-The User `META` row therefore projects into **both** GSIs simultaneously — `GSI1PK=EMAIL#<hash>` and `GSI2PK=PHONE#<hash>` — without needing a duplicate row. This keeps each user's identity-lookup data in one place: a single source of truth, no cross-row sync, no race condition between email-hash and phone-hash writes.
+The User `META` row projects into GSI1 as `(EMAIL#<hash>, USER)`. Same row also carries the user's profile attributes — single source of truth, no duplicate rows, no cross-row sync.
 
 ### Friendship storage shape
 
@@ -171,13 +171,13 @@ Single-table on Transactions: `UpdateItem` setting `deleted_at = now`, with the 
 
 Single-table on Users; state-machine transitions enforced via `ConditionExpression` on prior state.
 
-## Email & phone lookups (privacy)
+## Email lookup (privacy)
 
-- **No raw email or phone anywhere in DDB** — neither in attributes, nor in any index. Cognito is the sole store of the raw values.
+- **No raw email anywhere in DDB** — neither in attributes, nor in any index. Cognito is the sole store of the raw value.
+- **No phone in DDB at all** at MVP — Cognito stores it (optional unverified). When phone search returns post-MVP, add `phone_hash → GSI2PK` projection from the META row.
 - **HMAC-SHA-256 with a project-wide salt** stored in SSM Parameter Store as `SecureString` encrypted with the project CMK; salt is **never rotated** (rotation breaks lookups).
 - `lookup_hash(email) = HMAC-SHA256(salt, lower(trim(email)))`
-- `lookup_hash(phone_e164) = HMAC-SHA256(salt, e164(phone))`
-- The hashes project to `GSI1PK=EMAIL#<hex>` and `GSI2PK=PHONE#<hex>` from the user `META` row. The META row's regular attributes (`display_name, currency, status, created_at, updated_at, deactivated_at`) carry no PII.
+- The hash projects to `GSI1PK=EMAIL#<hex>` from the user `META` row. The META row's regular attributes (`display_name, currency, status, created_at, updated_at, deactivated_at`) carry no PII.
 
 This protects against accidental disclosure (anyone glancing at any DDB index, attribute, or backup sees only opaque hashes; raw PII isn't there to leak). It does *not* protect against a determined attacker with the salt; that's why salt access is gated by KMS Decrypt + SSM `GetParameter`.
 
@@ -196,10 +196,10 @@ This protects against accidental disclosure (anyone glancing at any DDB index, a
 
 ```mermaid
 flowchart TB
-    subgraph Users[ContriCool-Users — 2 GSIs]
-        UMeta[USER#id / META<br/>profile<br/>→ GSI1: EMAIL#hash<br/>→ GSI2: PHONE#hash]
+    subgraph Users[ContriCool-Users — 1 GSI]
+        UMeta[USER#id / META<br/>profile<br/>→ GSI1: EMAIL#hash]
         UFriend[USER#min / FRIEND#max<br/>friendship<br/>→ GSI1: USER#max → FRIEND#min]
-        URate[RATE#hash / OTP#channel<br/>rate-limit; TTL 24h]
+        URate[AUTH_RATE#hash / OTP#EMAIL<br/>rate-limit; TTL 24h]
     end
     subgraph Tx[ContriCool-Transactions — 1 GSI]
         TMeta[TXN#id / META<br/>creator, name, amount, ...,<br/>payers list embedded]
@@ -260,9 +260,9 @@ A daily scheduled Lambda (EventBridge → Lambda) at 03:00 UTC operates on both 
 
 ## Summary
 
-- **Two DynamoDB tables on-demand**: `ContriCool-Users-<env>` (social graph + identity ops) with **2 GSIs**; `ContriCool-Transactions-<env>` (financial ledger) with **1 GSI** — 3 GSIs total. Both tables encrypted with KMS CMK in prod, PITR on, DDB Streams on.
+- **Two DynamoDB tables on-demand**: `ContriCool-Users-<env>` (social graph + identity ops) with **1 GSI**; `ContriCool-Transactions-<env>` (financial ledger) with **1 GSI** — 2 GSIs total. Both tables encrypted with KMS CMK in prod, PITR on, DDB Streams on.
 - **Cross-table atomicity** via `TransactWriteItems` (up to 100 items spanning multiple tables); create-transaction at the 10-member cap is ~21 items — well under the limit.
-- **GSI1 on Users** is polymorphic across two shapes (`EMAIL#` for email lookup on the user `META` row; `USER#` for friend "user-is-max" view on friendship rows). **GSI2 on Users** is dedicated to `PHONE#` lookup on the user `META` row. The user `META` row projects into both GSIs from a single source-of-truth item — no duplicate rows, no cross-row sync.
-- **Email/phone lookups** via HMAC-SHA-256 of (salt + normalized identity); raw PII never lands in any index.
+- **GSI1 on Users** is polymorphic across two shapes (`EMAIL#` for email lookup on the user `META` row; `USER#` for friend "user-is-max" view on friendship rows). **No phone-related index at MVP** — phone lives only in Cognito as an optional unverified attribute (Design 4 + CONSTRAINTS.md).
+- **Email lookups** via HMAC-SHA-256 of (salt + normalized email); raw PII never lands in any index.
 - **Transactions table writes are now ~1+N+1 per transaction** (META + N MEMBER rows + AUDIT). PAYER rows are folded into META as an embedded list; PAIR-pivot rows are dropped — Pattern #9 ("transactions with friend X") resolves via two cheap GSI1 queries + intersection. Member cap stays at **10** for MVP scope (the schema is technically capable of more; raising is a one-line change post-MVP).
 - **Soft-deletes with 30-day grace; audit retained 90d post-hard-delete.**

@@ -144,10 +144,8 @@ Public routes are marked `🔓`; all others require JWT.
 | Method | Path | Purpose |
 |---|---|---|
 | POST 🔓 | /v1/auth/signup | Start signup |
-| POST 🔓 | /v1/auth/verify-email | Confirm email |
-| POST 🔓 | /v1/auth/verify-phone | Confirm phone |
+| POST 🔓 | /v1/auth/verify-email | Confirm email — activates account |
 | POST 🔓 | /v1/auth/resend-email-code | Resend (rate-limited) |
-| POST 🔓 | /v1/auth/resend-phone-code | Resend (rate-limited) |
 | POST 🔓 | /v1/auth/login | SRP login → tokens + refresh cookie |
 | POST 🔓 | /v1/auth/refresh | Refresh tokens via cookie |
 | POST | /v1/auth/logout | Revoke refresh token + clear cookie |
@@ -158,12 +156,20 @@ Sample shapes:
 
 `POST /v1/auth/signup`
 ```json
-{ "email": "alice@example.com", "phone": "+15551234567", "password": "...", "name": "Alice", "currency": "USD" }
+{
+  "email": "alice@example.com",
+  "password": "...",
+  "name": "Alice",
+  "currency": "USD",
+  "phone": "+15551234567"   // optional; stored unverified in Cognito; not used for any search/auth
+}
 ```
 Response 202:
 ```json
 { "user_id": "01J...", "status": "PENDING_VERIFICATION" }
 ```
+
+The only verification step is the email code; account becomes active on `POST /v1/auth/verify-email`. Phone (if provided) is stored as an unverified Cognito attribute and the UI displays it with an "(unverified)" tag.
 
 `POST /v1/auth/login`
 ```json
@@ -190,29 +196,35 @@ At MVP friendship is undirected and binary — no accept/decline, no blocking, n
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | /v1/friends/add | Add a friend by exact email or phone (auto-bilateral when target exists) |
+| POST | /v1/friends/add | Add a friend by exact email (auto-bilateral when target exists) |
 | GET | /v1/friends | List my friends |
 | DELETE | /v1/friends/{user_id} | Remove friendship (drops the canonical row from both sides) |
 | GET | /v1/friends/{user_id}/balance | Net balance with this friend |
 
 `POST /v1/friends/add` (idempotency-key optional)
 ```json
-{ "identifier": "bob@example.com" }   // or { "identifier": "+15559876543" }
+{ "identifier": "bob@example.com" }
 ```
+The `identifier` field accepts an **email only** at MVP. Phone is not a friend-add key (see Design 4 / CONSTRAINTS.md).
+
 Response 200 (target exists):
 ```json
 { "friend": { "user_id": "01J_bob", "display_name": "Bob" } }
 ```
+Response 400 (identifier not parseable as email):
+```json
+{ "error": { "code": "INVALID_IDENTIFIER", "message": "Friend lookup requires a valid email address.", "request_id": "01J..." } }
+```
 Response 404 (target not on platform):
 ```json
-{ "error": { "code": "USER_NOT_FOUND", "message": "No ContriCool user with this email/phone.", "request_id": "01J..." } }
+{ "error": { "code": "USER_NOT_FOUND", "message": "No ContriCool user with this email.", "request_id": "01J..." } }
 ```
 Response 409 (already friends):
 ```json
 { "error": { "code": "CONFLICT", "message": "You are already friends with this user.", "request_id": "01J..." } }
 ```
 
-The 404 response is honest about target existence — accepted MVP trade-off (Design 5/6) since the only way to probe is by knowing the exact email or phone (no enumeration affordances anywhere).
+The 404 response is honest about target existence — accepted MVP trade-off (Design 5/6) since the only way to probe is by knowing the exact email (no enumeration affordances anywhere).
 
 `GET /v1/friends?cursor=...`
 ```json
@@ -341,6 +353,6 @@ CI gate: if a PR changes Pydantic models or routes but `openapi.yaml` and `schem
 
 - **REST + JSON** at `/v1`, OpenAPI 3.1 emitted by FastAPI as the single source of truth → typed TS SDK consumed by web today and mobile tomorrow.
 - **Standard envelope** for errors with stable `code`s, **cursor pagination**, **ETag/If-Match** for optimistic concurrency, **`Idempotency-Key`** required on signup + transaction-create + restore.
-- **Endpoint inventory** covers auth (10), profile (3), friends (4 incl. balance), transactions (6) — total ~25 endpoints in `/v1`.
+- **Endpoint inventory** covers auth (8), profile (3), friends (4 incl. balance), transactions (6) — total ~23 endpoints in `/v1`.
 - **Mobile-ready**: no web-only assumptions; refresh-token cookie isolated to one endpoint; bearer-token everywhere else.
 - **Rate limiting at API Gateway** for auth and friend-request routes; idempotency table in DDB protects against retry storms.

@@ -153,24 +153,26 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 
 ## Phase 2 — Authentication & Identity
 
-**Goal**: a user can sign up with email + phone, verify both, log in, refresh their session, and see their own profile (name + currency). Aligned with **Designs 4, 7, 13**.
+**Goal**: a user can sign up with email (phone optional, unverified), verify their email, log in, refresh their session, and see their own profile (name + currency). Aligned with **Designs 4, 7, 13** and the email-only auth scope in CONSTRAINTS.md.
 
 **Why next**: every subsequent feature requires authenticated callers.
 
 ### 2a — Cognito infrastructure (CDK Auth stack)
 
 - [ ] `Contricool-<env>-Auth` stack: User Pool (`contricool-<env>`) with:
-  - Required attributes: `email`, `phone_number`, `name`.
+  - Required attributes: `email`, `name`.
+  - Optional unverified attribute: `phone_number` (E.164 if provided; never used for search/auth at MVP).
   - Custom attribute: `custom:user_id` (string, max 26 — for ULID).
   - Password policy: 10+ chars, complexity per Design 4.
-  - Email sender: Cognito-managed (`no-reply@verificationemail.com`); SMS via SNS.
-  - SignUp confirmation requires email; phone verified separately via `AdminConfirmUserAttribute`.
+  - Email sender: Cognito-managed (`no-reply@verificationemail.com`).
+  - **No SMS configuration** — phone verification dropped at MVP (CONSTRAINTS.md / Design 4).
+  - SignUp confirmation requires email only.
 - [ ] App clients (no secret): `web`, `ios`, `android`. Allowed flows: `USER_SRP_AUTH` + `REFRESH_TOKEN_AUTH`. Refresh validity 30d, access 1h.
 - [ ] CDK output: User Pool ID, App Client IDs (consumed by API Lambda env vars + frontend build).
 
 ### 2b — Users DDB table (CDK Data stack)
 
-- [ ] `ContriCool-Users-<env>` table: PK + SK string, two GSIs (GSI1 polymorphic for email + friend-max view; GSI2 dedicated to phone hash).
+- [ ] `ContriCool-Users-<env>` table: PK + SK string, **one GSI** (GSI1 polymorphic for email-hash lookup + friend-max view). No phone-related GSI at MVP — see Design 7 / CONSTRAINTS.md "Path to re-introduce phone verification."
 - [ ] On-demand billing.
 - [ ] PITR enabled in prod.
 - [ ] DDB Streams enabled in prod (no consumer yet).
@@ -186,7 +188,7 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 
 - [ ] `cognito_client.py` — boto3 wrapper with retries and error mapping (`UsernameExistsException` → 409 `EMAIL_EXISTS`, `NotAuthorizedException` → 401 `INVALID_CREDENTIALS`, etc.).
 - [ ] `rate_limit.py` — DDB-backed rate-limiter using `RATE#<hash>` rows; three caps per identity (OTP per hour, OTP per day, by channel); conditional update for race safety.
-- [ ] `service.py` — signup, verify-email, verify-phone (writes META row only when both verifications complete), login, refresh, logout, forgot-password, reset-password.
+- [ ] `service.py` — signup, verify-email (writes META row on email confirmation), login, refresh, logout, forgot-password, reset-password.
 - [ ] `routes.py` — FastAPI router mapping endpoints from Design 8.
 - [ ] `models.py` — Pydantic v2 request/response schemas.
 - [ ] `README.md` describing the feature, env vars, public endpoints.
@@ -569,9 +571,9 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 - [ ] **CloudTrail** verified delivering to audit bucket.
 - [ ] **Negative test sweep**: re-run the full negative-test suite from `CLAUDE.md` against prod-like env.
 
-### 7c — DLT registration & SES domain decision
+### 7c — SES domain decision (DLT/SMS deferred entirely)
 
-- [ ] Check DLT registration status for India SMS sender ID. If not yet approved, document fallback (patchy India SMS at launch) in launch runbook.
+- [ ] Phone verification is dropped at MVP (Design 4 / CONSTRAINTS.md); no DLT registration, no toll-free / 10DLC originator work for v1.
 - [ ] Decide whether to register `contricool.com` pre-launch:
   - If yes: ACM cert in **us-east-1** (mandatory for CloudFront — even though our primary region is us-west-2) covering `contricool.com` + `*.contricool.com`; Route 53 hosted zone; SES domain verification + DKIM/SPF/DMARC in us-west-2; switch Cognito to SES; activate friend-invite emails.
   - If no: launch on default CloudFront URL; defer SES + invite emails post-launch.
@@ -666,6 +668,6 @@ These are out of scope for the soft launch; they go through requirements + desig
 ## Plan-level open questions
 
 1. **Domain registration timing** — defer to Phase 7 (recommended) or register at Phase 0 to have it ready throughout? Recommendation: **defer**. The team has more important things to validate first; default `cloudfront.net` works perfectly for dev and the closed-beta soft launch.
-2. **DLT registration for India SMS** — start the application **at the beginning of Phase 2** since it takes 1–3 weeks; if not approved by Phase 7, document the limitation and proceed with patchy India delivery as a known issue for the soft launch.
+2. **DLT registration for India SMS** — **out of scope for v1** since phone verification was dropped from MVP (Design 4 / CONSTRAINTS.md). Reintroduce alongside business-registration when phone verification returns post-MVP.
 3. **WAF at launch** — recommend yes, rate-based rule only ($5/mo). Confirm at Phase 7.
 4. **AWS Identity Center setup** — recommend Phase 1a; confirm.

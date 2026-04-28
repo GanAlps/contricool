@@ -31,13 +31,25 @@ Implications:
 
 ## 4. Account Model
 
-- **Email AND phone both required** at signup.
-- **Both verified** before the account is active (email link + SMS OTP).
+- **Email is required and verified** at signup (only verification factor at MVP).
+- **Phone is optional, unverified, and treated as opaque metadata** at MVP.
+- **Friend search/add is by email only** at MVP. Phone is not used for any lookup, search, friend-discovery, or account-recovery flow.
 
 Implications:
-- Two verification flows must complete before first login. Higher friction; UX must make this smooth (can run in parallel).
-- Friend lookup works by either email or phone (per requirement #2).
-- Cognito User Pools is a strong fit — supports both as standard attributes with verification.
+- One verification flow (email link or email OTP code) before first login. Lower friction signup.
+- Phone is captured at signup if user provides it, but the value is not validated for ownership. We do format-validate as E.164 if present.
+- Phone lives on the Cognito User Pool as an **optional unverified attribute**; it is **not** stored in DynamoDB at all (no hash, no GSI, no profile attribute). When the client needs to display the user's own phone (e.g., settings page), it reads from the Cognito ID token claims.
+- **No SMS is sent at MVP.** SNS SMS spend cap remains at $5/mo as defense-in-depth (an attacker who somehow gained access to the account couldn't run up SMS bills); but no production code path actually publishes SMS.
+- **DLT registration, 10DLC registration, toll-free origination, SNS sandbox phone-verification** — all completely deferred until phone verification is reintroduced post-MVP.
+- **Trade-off accepted**: weaker fraud surface (one fewer verification factor); friend-add no longer privacy-preserving for not-on-platform identifiers via phone (it never was via phone alone, but the phone-as-friend-handle UX is also gone). User's prerogative — locked at AWS-foundation step.
+
+Path to re-introduce phone verification (post-public-launch, requires business registration):
+- Restore Cognito phone_number as required + verified.
+- Restore SMS OTP signup step.
+- Add GSI2 on `ContriCool-Users-<env>` for phone-hash lookup.
+- Backfill: re-hash existing users' phones (if they provided one) into GSI2.
+- Update `/v1/friends/add` to accept phone identifier again.
+- Wire the originator (10DLC / toll-free / sender ID for India) into Cognito's SNS configuration.
 
 ## 5. Budget
 

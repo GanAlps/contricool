@@ -10,8 +10,8 @@ ContriCool stores email, phone, and friend-graph data — all PII. This design d
 |---|---|---|---|
 | Email (raw) | **Cognito User Pool only** — never stored in DDB | High | Cognito-managed encryption |
 | Email (hashed, HMAC-SHA-256) | **`ContriCool-Users-<env>`** projected to GSI1 `EMAIL#<hash>` from the user `META` row; also on OTP rate-limit rows | Low | DDB CMK (prod) |
-| Phone (E.164 raw) | **Cognito only** — never stored in DDB | High | Cognito-managed encryption |
-| Phone (hashed, HMAC-SHA-256) | **`ContriCool-Users-<env>`** projected to GSI2 `PHONE#<hash>` from the user `META` row | Low | DDB CMK (prod) |
+| Phone (E.164 raw, **optional + unverified**) | **Cognito only** — never stored in DDB | Medium (lower than email since unverified and not used for auth) | Cognito-managed encryption |
+| Phone (hashed) | **Not stored anywhere at MVP** — phone is not a search key (see Design 4 / CONSTRAINTS.md). Reintroduced as `GSI2PK=PHONE#<hash>` post-business-registration. | n/a | n/a |
 | Display name | **`ContriCool-Users-<env>`** `USER#<id>#META` | Medium | DDB CMK |
 | Password hash (Argon2id) | Cognito only | Highest | Cognito KMS |
 | Friendship graph | **`ContriCool-Users-<env>`** | Medium (relational PII) | DDB CMK |
@@ -55,7 +55,7 @@ lookup_hash(email_or_phone, salt) = HMAC-SHA256(salt, normalize(email_or_phone))
   - email → `lower(trim(email))` (lowercase, trim whitespace; no Punycode handling at MVP — defer Unicode emails).
   - phone → E.164 (normalized via `phonenumbers` lib, `+CountryCode` form; e.g. `+15551234567`).
 - **Salt**: one project-wide secret stored in SSM Parameter Store as `SecureString` encrypted with the project CMK; created at deploy time and **never rotated** (rotation breaks lookups; we accept this).
-- **Storage**: only the hex hash lands in DDB (projected to `GSI1PK=EMAIL#<hex>` and `GSI2PK=PHONE#<hex>` from the user `META` row). **Raw email and phone live exclusively in Cognito** — DDB never stores them. When the API needs to display the user's own email/phone (e.g., on a profile screen), the client reads it from Cognito ID token claims; no DDB row carries the raw value.
+- **Storage**: only the email hex hash lands in DDB (projected to `GSI1PK=EMAIL#<hex>` from the user `META` row). **Raw email and phone live exclusively in Cognito** — DDB never stores them. **Phone is not even hashed in DDB at MVP** because it is not a search key (see Design 4 / CONSTRAINTS.md). When the API needs to display the user's own email/phone (e.g., on a profile screen), the client reads it from Cognito ID token claims; no DDB row carries the raw value.
 
 ### Privacy-preserving friend-request response
 
@@ -90,7 +90,7 @@ stateDiagram-v2
 - A daily scheduled Lambda (EventBridge → Lambda) finds users where `deactivated_at < now - 30d`.
 - For each, in order:
   - **`ContriCool-Users-<env>`**:
-    - Hard-delete `USER#<id>#META` (display_name, currency, status; both GSI1 EMAIL# and GSI2 PHONE# hash projections drop with the row). No raw PII to scrub here — DDB never held it.
+    - Hard-delete `USER#<id>#META` (display_name, currency, status; the GSI1 EMAIL# hash projection drops with the row). No raw PII to scrub here — DDB never held it (phone is in Cognito only and is purged in the Cognito step below).
     - Hard-delete all `FRIENDSHIP` rows involving this user (rows where the user is `min(a,b)` in PK; cross-check via GSI1 query for rows where the user is `max`).
     - Hard-delete all their `RATE` rows.
   - **`ContriCool-Transactions-<env>`**:
