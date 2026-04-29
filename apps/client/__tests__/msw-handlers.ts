@@ -1,7 +1,10 @@
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 
-const BASE = '/v1';
+// Absolute base — matches the test-setup `EXPO_PUBLIC_API_BASE_URL`.
+// openapi-fetch resolves request URLs through `new URL(...)` which
+// requires absolute bases, so MSW handlers must match the same.
+const BASE = 'http://localhost/v1';
 
 type SignupBody = {
   email: string;

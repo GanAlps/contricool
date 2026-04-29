@@ -166,7 +166,7 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 | 2c | Backend `auth` feature (signup/verify/login/refresh/forgot/reset + rate-limit + JWT verifier) | `specs/phase-2c-auth-feature/` |
 | 2c-followup | Powertools idempotency on `POST /v1/auth/signup` (deferred from 2c) | TBD — small PR |
 | 2d | Expo client foundation + auth screens | `specs/phase-2d-client-auth-foundation/` |
-| 2e | OpenAPI + SDK regen + end-to-end wiring | TBD |
+| 2e | OpenAPI + SDK regen + end-to-end wiring | `specs/phase-2e-openapi-sdk-deploy/` |
 
 ### 2a — Cognito infrastructure (CDK Auth stack)
 

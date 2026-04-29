@@ -1,376 +1,138 @@
+/**
+ * Phase 2e: lib/api.ts is now a thin singleton over @contricool/client-sdk.
+ * The exhaustive middleware behaviour is tested in the SDK package
+ * (errors / middleware / createClient suites).  These tests verify
+ * that the singleton wires the SDK to the auth store correctly:
+ *   - `apiClient` is a single instance (no per-call factory churn).
+ *   - `getAccessToken` reads from the live store.
+ *   - `onTokenRefreshed` writes back through `_setTokensFromRefresh`.
+ *   - `onUnauthenticated` clears the store.
+ */
 import { http, HttpResponse } from 'msw';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { type ApiAuthAccessors, ApiErrorException, apiFetch, setApiAuthAccessors } from '~/lib/api';
+import { ApiErrorException, apiClient } from '~/lib/api';
+import { useAuthStore } from '~/lib/auth-store';
 
 import { server } from '../msw-handlers';
 
-const BASE = '/v1';
-
-function makeAccessors(initialToken: string | null = null): {
-  accessors: ApiAuthAccessors;
-  state: { token: string | null; refreshSet: number; signedOut: number };
-} {
-  const state = { token: initialToken, refreshSet: 0, signedOut: 0 };
-  const accessors: ApiAuthAccessors = {
-    getAccessToken: () => state.token,
-    setTokensFromRefresh: ({ access_token }) => {
-      state.token = access_token;
-      state.refreshSet++;
-    },
-    forceSignOut: () => {
-      state.signedOut++;
-    },
-  };
-  return { accessors, state };
+function b64url(input: string): string {
+  return btoa(input).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+function makeIdToken(claims: Record<string, unknown>): string {
+  return `${b64url('{}')}.${b64url(JSON.stringify(claims))}.sig`;
 }
 
-describe('apiFetch', () => {
-  beforeEach(() => {
-    setApiAuthAccessors(null);
-  });
-  afterEach(() => {
-    setApiAuthAccessors(null);
+beforeEach(() => {
+  useAuthStore.getState()._clear();
+});
+afterEach(() => {
+  useAuthStore.getState()._clear();
+});
+
+describe('apiClient singleton', () => {
+  it('is a single instance — repeated imports return the same client', async () => {
+    const reimported = (await import('~/lib/api')).apiClient;
+    expect(reimported).toBe(apiClient);
   });
 
-  it('attaches Authorization: Bearer when accessors return a token and auth is bearer', async () => {
-    const { accessors, state } = makeAccessors('tok-1');
-    setApiAuthAccessors(accessors);
-    let receivedAuth: string | null = null;
+  it('attaches Bearer token from the store on non-/auth/ requests', async () => {
+    useAuthStore.setState({ accessToken: 'tok-123' });
+    let received: string | null = null;
     server.use(
-      http.get(`${BASE}/things`, ({ request }) => {
-        receivedAuth = request.headers.get('authorization');
+      http.get('http://localhost/v1/me', ({ request }) => {
+        received = request.headers.get('authorization');
         return HttpResponse.json({ ok: true });
       }),
     );
-    await apiFetch('/things');
-    expect(receivedAuth).toBe('Bearer tok-1');
-    expect(state.token).toBe('tok-1');
+    // openapi-fetch with a path not in the schema falls back to a
+    // typed-as-never call; cast through unknown to bypass.
+    await (
+      apiClient as unknown as {
+        GET: (p: string) => Promise<{ data?: unknown }>;
+      }
+    ).GET('/me');
+    expect(received).toBe('Bearer tok-123');
   });
 
-  it('skips Authorization when auth: public', async () => {
-    const { accessors } = makeAccessors('tok-1');
-    setApiAuthAccessors(accessors);
-    let receivedAuth: string | null = '<unset>';
-    server.use(
-      http.post(`${BASE}/auth/login`, ({ request }) => {
-        receivedAuth = request.headers.get('authorization');
-        return HttpResponse.json({ ok: true });
-      }),
-    );
-    await apiFetch('/auth/login', { method: 'POST', json: {}, auth: 'public' });
-    expect(receivedAuth).toBeNull();
-  });
-
-  it('returns void on 204', async () => {
-    server.use(http.post(`${BASE}/auth/logout`, () => new HttpResponse(null, { status: 204 })));
-    setApiAuthAccessors(makeAccessors('tok-1').accessors);
-    const result = await apiFetch('/auth/logout', { method: 'POST' });
-    expect(result).toBeUndefined();
-  });
-
-  it('parses JSON on 200', async () => {
-    server.use(http.get(`${BASE}/me`, () => HttpResponse.json({ user_id: 'u1' })));
-    setApiAuthAccessors(makeAccessors('tok-1').accessors);
-    const r = await apiFetch<{ user_id: string }>('/me');
-    expect(r.user_id).toBe('u1');
-  });
-
-  it('throws ApiErrorException with envelope code on 4xx', async () => {
-    server.use(
-      http.post(`${BASE}/auth/login`, () =>
-        HttpResponse.json(
-          {
-            error: {
-              code: 'INVALID_CREDENTIALS',
-              message: 'Email or password is incorrect',
-              request_id: 'req-1',
-            },
-          },
-          { status: 401 },
-        ),
-      ),
-    );
-    setApiAuthAccessors(makeAccessors().accessors);
-    await expect(
-      apiFetch('/auth/login', { method: 'POST', json: {}, auth: 'public' }),
-    ).rejects.toMatchObject({
-      name: 'ApiErrorException',
-      error: { code: 'INVALID_CREDENTIALS', http_status: 401 },
+  it('updates the store when a 401 triggers a successful refresh', async () => {
+    useAuthStore.setState({ accessToken: 'old-tok' });
+    const newId = makeIdToken({
+      'custom:user_id': 'u1',
+      name: 'Alice',
+      'custom:currency': 'USD',
     });
-  });
-
-  it('synthesises NETWORK_ERROR on raw 5xx HTML body (N20)', async () => {
-    server.use(http.get(`${BASE}/me`, () => new HttpResponse('<html>503</html>', { status: 503 })));
-    setApiAuthAccessors(makeAccessors('tok-1').accessors);
-    try {
-      await apiFetch('/me');
-      throw new Error('should have thrown');
-    } catch (e) {
-      expect(e).toBeInstanceOf(ApiErrorException);
-      const ee = e as ApiErrorException;
-      expect(ee.error.code).toBe('NETWORK_ERROR');
-      expect(ee.error.request_id).toBeNull();
-      expect(ee.error.http_status).toBe(503);
-    }
-  });
-
-  it('handles empty 200 body as undefined', async () => {
-    server.use(http.post(`${BASE}/ping`, () => new HttpResponse('', { status: 200 })));
-    setApiAuthAccessors(makeAccessors().accessors);
-    const r = await apiFetch('/ping', { method: 'POST', auth: 'public' });
-    expect(r).toBeUndefined();
-  });
-
-  it('retries once after 401 → refresh succeeds → original returns (N17)', async () => {
-    const { accessors, state } = makeAccessors('old-token');
-    setApiAuthAccessors(accessors);
-    let callCount = 0;
     server.use(
-      http.get(`${BASE}/me`, ({ request }) => {
-        callCount++;
-        const auth = request.headers.get('authorization');
-        if (auth === 'Bearer new-token') {
-          return HttpResponse.json({ user_id: 'u1' });
-        }
+      http.get('http://localhost/v1/me', ({ request }) => {
+        const a = request.headers.get('authorization');
+        if (a === 'Bearer new-tok') return HttpResponse.json({ user_id: 'u1' });
         return HttpResponse.json(
-          { error: { code: 'UNAUTHENTICATED', message: 'expired', request_id: 'r1' } },
+          { error: { code: 'UNAUTHENTICATED', message: 'expired', request_id: 'r' } },
           { status: 401 },
         );
       }),
-      http.post(`${BASE}/auth/refresh`, () =>
-        HttpResponse.json({ access_token: 'new-token', id_token: 'new-id', expires_in: 3600 }),
+      http.post('http://localhost/v1/auth/refresh', () =>
+        HttpResponse.json({ access_token: 'new-tok', id_token: newId, expires_in: 3600 }),
       ),
     );
-    const r = await apiFetch<{ user_id: string }>('/me');
-    expect(r.user_id).toBe('u1');
-    expect(callCount).toBe(2);
-    expect(state.refreshSet).toBe(1);
-    expect(state.token).toBe('new-token');
+    await (
+      apiClient as unknown as {
+        GET: (p: string) => Promise<{ data?: unknown }>;
+      }
+    ).GET('/me');
+    expect(useAuthStore.getState().accessToken).toBe('new-tok');
+    expect(useAuthStore.getState().user?.name).toBe('Alice');
   });
 
-  it('signs out and surfaces 401 when refresh also returns 401 (N18)', async () => {
-    const { accessors, state } = makeAccessors('old-token');
-    setApiAuthAccessors(accessors);
-    server.use(
-      http.get(`${BASE}/me`, () =>
-        HttpResponse.json(
-          { error: { code: 'UNAUTHENTICATED', message: 'expired', request_id: 'r1' } },
-          { status: 401 },
-        ),
-      ),
-      http.post(`${BASE}/auth/refresh`, () =>
-        HttpResponse.json(
-          { error: { code: 'REFRESH_FAILED', message: 'no refresh', request_id: 'r2' } },
-          { status: 401 },
-        ),
-      ),
-    );
-    await expect(apiFetch('/me')).rejects.toMatchObject({
-      error: { code: 'UNAUTHENTICATED', http_status: 401 },
+  it('clears the store when refresh also fails', async () => {
+    useAuthStore.setState({
+      user: { user_id: 'u', name: 'A', currency: 'USD' },
+      accessToken: 'old',
+      idToken: 'i',
+      loading: false,
     });
-    expect(state.signedOut).toBe(1);
+    server.use(
+      http.get('http://localhost/v1/me', () =>
+        HttpResponse.json(
+          { error: { code: 'UNAUTHENTICATED', message: 'gone', request_id: 'r' } },
+          { status: 401 },
+        ),
+      ),
+      http.post('http://localhost/v1/auth/refresh', () =>
+        HttpResponse.json(
+          { error: { code: 'REFRESH_FAILED', message: 'no', request_id: 'r2' } },
+          { status: 401 },
+        ),
+      ),
+    );
+    await expect(
+      (
+        apiClient as unknown as {
+          GET: (p: string) => Promise<{ data?: unknown }>;
+        }
+      ).GET('/me'),
+    ).rejects.toBeInstanceOf(ApiErrorException);
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().accessToken).toBeNull();
   });
 
-  it('does NOT trigger refresh-and-retry on /v1/auth/login 401 (N19)', async () => {
-    const { accessors, state } = makeAccessors();
-    setApiAuthAccessors(accessors);
+  it('does not retry on /v1/auth/login 401', async () => {
     let refreshCalled = 0;
     server.use(
-      http.post(`${BASE}/auth/login`, () =>
+      http.post('http://localhost/v1/auth/login', () =>
         HttpResponse.json(
-          { error: { code: 'INVALID_CREDENTIALS', message: 'nope', request_id: 'r1' } },
+          { error: { code: 'INVALID_CREDENTIALS', message: 'nope', request_id: 'r' } },
           { status: 401 },
         ),
       ),
-      http.post(`${BASE}/auth/refresh`, () => {
+      http.post('http://localhost/v1/auth/refresh', () => {
         refreshCalled++;
         return HttpResponse.json({ access_token: 'x', id_token: 'y', expires_in: 1 });
       }),
     );
     await expect(
-      apiFetch('/auth/login', { method: 'POST', json: {}, auth: 'public' }),
+      apiClient.POST('/auth/login', { body: { email: 'a@b.com', password: 'wrong' } }),
     ).rejects.toMatchObject({ error: { code: 'INVALID_CREDENTIALS' } });
     expect(refreshCalled).toBe(0);
-    expect(state.signedOut).toBe(0);
-  });
-
-  it('preserves retry_after when present on 429', async () => {
-    server.use(
-      http.post(`${BASE}/auth/forgot-password`, () =>
-        HttpResponse.json(
-          {
-            error: {
-              code: 'RATE_LIMITED',
-              message: 'slow down',
-              request_id: 'r1',
-              retry_after: 60,
-            },
-          },
-          { status: 429 },
-        ),
-      ),
-    );
-    setApiAuthAccessors(makeAccessors().accessors);
-    try {
-      await apiFetch('/auth/forgot-password', {
-        method: 'POST',
-        json: {},
-        auth: 'public',
-      });
-      throw new Error('should have thrown');
-    } catch (e) {
-      const ee = e as ApiErrorException;
-      expect(ee.error.code).toBe('RATE_LIMITED');
-      expect(ee.error.retry_after).toBe(60);
-    }
-  });
-
-  it('does not retry when accessors not configured', async () => {
-    let calls = 0;
-    server.use(
-      http.get(`${BASE}/me`, () => {
-        calls++;
-        return HttpResponse.json(
-          { error: { code: 'UNAUTHENTICATED', message: 'x', request_id: 'r1' } },
-          { status: 401 },
-        );
-      }),
-    );
-    await expect(apiFetch('/me')).rejects.toBeInstanceOf(ApiErrorException);
-    expect(calls).toBe(1);
-  });
-
-  it('does not retry when __noRetry is set', async () => {
-    const { accessors, state } = makeAccessors('t');
-    setApiAuthAccessors(accessors);
-    let calls = 0;
-    server.use(
-      http.get(`${BASE}/me`, () => {
-        calls++;
-        return HttpResponse.json(
-          { error: { code: 'UNAUTHENTICATED', message: 'x', request_id: 'r1' } },
-          { status: 401 },
-        );
-      }),
-    );
-    await expect(apiFetch('/me', { __noRetry: true })).rejects.toBeInstanceOf(ApiErrorException);
-    expect(calls).toBe(1);
-    expect(state.signedOut).toBe(0);
-  });
-
-  it('falls through to NETWORK_ERROR when body is empty on a non-2xx', async () => {
-    server.use(http.get(`${BASE}/me`, () => new HttpResponse(null, { status: 502 })));
-    setApiAuthAccessors(makeAccessors('t').accessors);
-    try {
-      await apiFetch('/me');
-      throw new Error('should have thrown');
-    } catch (e) {
-      const ee = e as ApiErrorException;
-      expect(ee.error.code).toBe('NETWORK_ERROR');
-      expect(ee.error.http_status).toBe(502);
-    }
-  });
-
-  it('forceSignOut errors are swallowed', async () => {
-    const accessors: ApiAuthAccessors = {
-      getAccessToken: () => 't',
-      setTokensFromRefresh: vi.fn(),
-      forceSignOut: () => {
-        throw new Error('boom');
-      },
-    };
-    setApiAuthAccessors(accessors);
-    server.use(
-      http.get(`${BASE}/me`, () =>
-        HttpResponse.json(
-          { error: { code: 'UNAUTHENTICATED', message: 'x', request_id: 'r1' } },
-          { status: 401 },
-        ),
-      ),
-      http.post(`${BASE}/auth/refresh`, () =>
-        HttpResponse.json(
-          { error: { code: 'REFRESH_FAILED', message: 'x', request_id: 'r2' } },
-          { status: 401 },
-        ),
-      ),
-    );
-    await expect(apiFetch('/me')).rejects.toMatchObject({
-      error: { code: 'UNAUTHENTICATED' },
-    });
-  });
-
-  it('handles empty error body via empty text path', async () => {
-    server.use(http.get(`${BASE}/me`, () => new HttpResponse(null, { status: 500 })));
-    setApiAuthAccessors(makeAccessors('t').accessors);
-    try {
-      await apiFetch('/me');
-      throw new Error('should have thrown');
-    } catch (e) {
-      const ee = e as ApiErrorException;
-      expect(ee.error.http_status).toBe(500);
-      expect(ee.error.code).toBe('NETWORK_ERROR');
-    }
-  });
-
-  it('parses an envelope without a request_id (defaults to null)', async () => {
-    server.use(
-      http.get(`${BASE}/things`, () =>
-        HttpResponse.json({ error: { code: 'X', message: 'y' } }, { status: 400 }),
-      ),
-    );
-    setApiAuthAccessors(makeAccessors('t').accessors);
-    try {
-      await apiFetch('/things');
-      throw new Error('should have thrown');
-    } catch (e) {
-      const ee = e as ApiErrorException;
-      expect(ee.error.request_id).toBeNull();
-      expect(ee.error.details).toEqual([]);
-    }
-  });
-
-  it('respects a caller-supplied content-type', async () => {
-    let receivedCT: string | null = null;
-    server.use(
-      http.post(`${BASE}/raw`, ({ request }) => {
-        receivedCT = request.headers.get('content-type');
-        return HttpResponse.json({ ok: true });
-      }),
-    );
-    setApiAuthAccessors(makeAccessors().accessors);
-    await apiFetch('/raw', {
-      method: 'POST',
-      json: { x: 1 },
-      auth: 'public',
-      headers: { 'content-type': 'application/vnd.custom' },
-    });
-    expect(receivedCT).toBe('application/vnd.custom');
-  });
-
-  it('handles a Response whose .text() throws (defensive parseError catch)', async () => {
-    // Stub fetch globally for this test only — bypasses MSW.
-    const realFetch = globalThis.fetch;
-    globalThis.fetch = (async () =>
-      ({
-        ok: false,
-        status: 502,
-        text: () => {
-          throw new Error('stream broke');
-        },
-      }) as unknown as Response) as typeof fetch;
-    try {
-      setApiAuthAccessors(makeAccessors('t').accessors);
-      try {
-        await apiFetch('/me');
-        throw new Error('should have thrown');
-      } catch (e) {
-        const ee = e as ApiErrorException;
-        expect(ee.error.code).toBe('NETWORK_ERROR');
-        expect(ee.error.http_status).toBe(502);
-      }
-    } finally {
-      globalThis.fetch = realFetch;
-    }
   });
 });

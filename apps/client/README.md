@@ -151,21 +151,50 @@ apps/client/
 - **Native build (iOS/Android)** — post-MVP, via EAS. The screens
   already work on RN; only EAS profiles + native `auth-driver.native.ts`
   are missing.
-- **Production deploy** — Phase 1's static placeholder still serves
-  prod web traffic. Phase 2e flips the deploy target to this app's
-  build output.
-- **OpenAPI-generated SDK** — Phase 2e replaces `lib/api.ts` and
-  `lib/types.ts` with `@contricool/client-sdk`.
 - **Friends, transactions, profile, settings** — Phases 3, 4, 5.
 - **Push notifications, deep links, PWA install prompt, i18n,
   analytics** — all post-MVP.
 
-## Phase 2d acceptance
+## Production deploy
+
+Phase 2e flipped the production web deploy from the Phase-1
+"coming soon" placeholder to this app's build output. The flow:
+
+1. CI builds `@contricool/client-sdk` (regenerates types from
+   `packages/openapi/openapi.yaml`).
+2. CI builds the Expo web bundle (`pnpm --filter @contricool/client build:web`).
+3. CDK's `WebStack.BucketDeployment` syncs `apps/client/dist/` to S3
+   and invalidates `/*` on the CloudFront distribution.
+4. The smoke step asserts `/` serves an HTML body containing a
+   `<script>` tag — proves the SPA shell, not the placeholder.
+
+`apps/client/static/` was deleted in Phase 2e; the `dist/` build
+output is the single source of truth.
+
+## API client
+
+The client uses `@contricool/client-sdk` (Phase 2e) for all
+backend calls. The SDK is generated from FastAPI's OpenAPI spec, so
+`lib/types.ts` is now a thin re-export of SDK shapes and `lib/api.ts`
+is a singleton `createClient(...)` factory wired to the auth store.
+
+Add `@contricool/client-sdk` import shapes to screens directly when
+you need typed request/response shapes.
+
+```ts
+import type { SignInResponse, AuthUser } from '@contricool/client-sdk';
+```
+
+## Phase 2d / 2e acceptance
 
 - [x] 5 auth screens + stub dashboard render and submit.
 - [x] 401 → refresh → retry-once flow tested end-to-end.
-- [x] Tokens never persisted to localStorage / sessionStorage
-  (storage-negative test asserts).
+- [x] Tokens never persisted to localStorage / sessionStorage.
 - [x] Coverage thresholds met.
 - [x] Lint + typecheck clean.
 - [x] No env-specific identifiers in source (red-line 1).
+- [x] **2e**: SDK generated from FastAPI; `make openapi-check`
+      gates drift in CI.
+- [x] **2e**: Production web deploy serves the Expo bundle.
+- [x] **2e**: CORS allows `localhost:8081` so `pnpm dev:web` can
+      hit the dev API directly.

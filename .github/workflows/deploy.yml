@@ -26,9 +26,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: "pnpm"
       # The API Lambda image is arm64 but GitHub-hosted runners are x86_64.
       # qemu provides binfmt_misc emulation so ``RUN`` steps inside the
       # arm64 base image can execute. buildx is the modern docker build
@@ -39,11 +41,48 @@ jobs:
         run: npm install -g aws-cdk
       - name: Install infra deps
         run: pip install -e 'apps/infra[dev]'
+      # Phase 2e: build the client SDK + Expo web bundle BEFORE
+      # `cdk deploy` so WebStack's BucketDeployment has the artefact.
+      # Same commands the `client` and `client-sdk` CI jobs run, so
+      # CI-vs-deploy bundle drift is impossible.
+      - name: Install workspace deps
+        run: pnpm install --frozen-lockfile
+      - name: Build SDK (generates schema types)
+        run: pnpm --filter @contricool/client-sdk build
+      - name: Build Expo web bundle
+        run: pnpm --filter @contricool/client build:web
+      - name: Verify bundle exists
+        run: test -f apps/client/dist/index.html
+      - name: Bundle-size gate
+        working-directory: apps/client
+        run: node scripts/check-bundle-size.mjs
       - name: Configure AWS credentials (Dev deploy via OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_DEV }}
           aws-region: ${{ vars.AWS_REGION }}
+      # Phase 2e: ApiStack reads /contricool/dev/cloudfront-domain via
+      # `ssm.StringParameter.value_for_string_parameter`, which is a CFN
+      # dynamic reference (`{{resolve:ssm:...}}`) resolved at stack-update
+      # time.  On a brand-new env the parameter doesn't exist yet, which
+      # causes CloudFormation to fail the stack.  Pre-seed with a
+      # placeholder value (idempotent — `--overwrite` is a no-op when
+      # the parameter already holds the real domain).
+      - name: Pre-seed cloudfront-domain SSM (idempotent placeholder)
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          existing="$(aws ssm get-parameter \
+            --name /contricool/dev/cloudfront-domain \
+            --query 'Parameter.Value' --output text 2>/dev/null || echo '')"
+          if [ -z "${existing}" ]; then
+            aws ssm put-parameter \
+              --name /contricool/dev/cloudfront-domain \
+              --value "placeholder.invalid" \
+              --type String \
+              --overwrite
+          fi
       - name: cdk deploy Contricool-Dev-*
         working-directory: apps/infra
         env:
@@ -155,6 +194,26 @@ jobs:
           done
           echo "::error::Smoke failed after ${max_attempts} attempts"
           exit 1
+      - name: Curl SPA shell at / (Phase 2e — proves bundle deployed)
+        env:
+          CF_DOMAIN: ${{ needs.deploy-dev.outputs.cf_domain }}
+        run: |
+          set -euo pipefail
+          attempt=0
+          max_attempts=6
+          backoff=10
+          while [ "${attempt}" -lt "${max_attempts}" ]; do
+            body="$(curl -fsS "https://${CF_DOMAIN}/" || echo '')"
+            if echo "${body}" | grep -q '<script'; then
+              echo "SPA shell served from /"
+              exit 0
+            fi
+            echo "Attempt $((attempt + 1))/${max_attempts}: no <script> tag yet"
+            attempt=$((attempt + 1))
+            sleep "${backoff}"
+          done
+          echo "::error::SPA shell missing — Phase-1 placeholder still served?"
+          exit 1
 
   deploy-prod:
     name: deploy-prod
@@ -168,9 +227,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: "pnpm"
       # arm64 cross-build emulation; same rationale as deploy-dev. CDK
       # asset hash is content-addressed, so prod's image is reused from
       # ECR without a second build — but buildx still needs to be
@@ -181,11 +242,40 @@ jobs:
         run: npm install -g aws-cdk
       - name: Install infra deps
         run: pip install -e 'apps/infra[dev]'
+      # Phase 2e — same SDK + bundle pre-build as deploy-dev.
+      - name: Install workspace deps
+        run: pnpm install --frozen-lockfile
+      - name: Build SDK (generates schema types)
+        run: pnpm --filter @contricool/client-sdk build
+      - name: Build Expo web bundle
+        run: pnpm --filter @contricool/client build:web
+      - name: Verify bundle exists
+        run: test -f apps/client/dist/index.html
+      - name: Bundle-size gate
+        working-directory: apps/client
+        run: node scripts/check-bundle-size.mjs
       - name: Configure AWS credentials (Prod deploy via OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_PROD }}
           aws-region: ${{ vars.AWS_REGION }}
+      # Phase 2e — same first-deploy SSM pre-seed as deploy-dev. See
+      # the dev step above for rationale.
+      - name: Pre-seed cloudfront-domain SSM (idempotent placeholder)
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          existing="$(aws ssm get-parameter \
+            --name /contricool/prod/cloudfront-domain \
+            --query 'Parameter.Value' --output text 2>/dev/null || echo '')"
+          if [ -z "${existing}" ]; then
+            aws ssm put-parameter \
+              --name /contricool/prod/cloudfront-domain \
+              --value "placeholder.invalid" \
+              --type String \
+              --overwrite
+          fi
       - name: cdk deploy Contricool-Prod-*
         working-directory: apps/infra
         env:
@@ -312,6 +402,26 @@ jobs:
             sleep "${backoff}"
           done
           echo "::error::Smoke failed after ${max_attempts} attempts"
+          exit 1
+      - name: Curl SPA shell at / (Phase 2e — proves bundle deployed)
+        env:
+          CF_DOMAIN: ${{ needs.deploy-prod.outputs.cf_domain }}
+        run: |
+          set -euo pipefail
+          attempt=0
+          max_attempts=6
+          backoff=10
+          while [ "${attempt}" -lt "${max_attempts}" ]; do
+            body="$(curl -fsS "https://${CF_DOMAIN}/" || echo '')"
+            if echo "${body}" | grep -q '<script'; then
+              echo "SPA shell served from /"
+              exit 0
+            fi
+            echo "Attempt $((attempt + 1))/${max_attempts}: no <script> tag yet"
+            attempt=$((attempt + 1))
+            sleep "${backoff}"
+          done
+          echo "::error::SPA shell missing — Phase-1 placeholder still served?"
           exit 1
 
   tag-release:

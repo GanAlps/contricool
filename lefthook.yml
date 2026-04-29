@@ -13,6 +13,15 @@ pre-commit:
     # later phases. Until apps/api and apps/client carry source files, these
     # commands are no-ops.
 
+    # Phase 2e — auto-regenerate openapi.yaml + SDK schema when staged
+    # changes touch the API surface, then re-stage the regenerated files.
+    openapi-regen:
+      glob: "apps/api/app/{features,routes,main.py}/**/*.py,apps/api/app/main.py"
+      run: |
+        if make openapi >/dev/null 2>&1; then
+          git add packages/openapi/openapi.yaml packages/client-sdk/src/schema.d.ts 2>/dev/null || true
+        fi
+
 pre-push:
   parallel: true
   commands:

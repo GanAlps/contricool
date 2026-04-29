@@ -8,6 +8,8 @@ public access).
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import aws_cdk as cdk
 import pytest
 from aws_cdk import assertions
@@ -18,6 +20,10 @@ from stacks.data_stack import DataStack
 from stacks.monitoring_stack import MonitoringStack
 from stacks.shared_stack import SharedStack
 from stacks.web_stack import WebStack
+
+# Phase 2e: synth tests use a tiny placeholder bundle so they don't
+# depend on `pnpm --filter @contricool/client build:web` having run.
+_WEB_BUNDLE_FIXTURE = str(Path(__file__).parent / "fixtures" / "web-bundle")
 
 
 @pytest.fixture
@@ -494,6 +500,7 @@ def test_web_stack_synthesizes(cdk_env: cdk.Environment) -> None:
         env=cdk_env,
         env_name="dev",
         api_gateway=api.api_gateway,
+        bundle_source_path=_WEB_BUNDLE_FIXTURE,
     )
     template = assertions.Template.from_stack(stack)
 
@@ -540,6 +547,7 @@ def test_web_stack_csp_goes_through_security_headers_not_custom_headers(
         env=cdk_env,
         env_name="dev",
         api_gateway=api.api_gateway,
+        bundle_source_path=_WEB_BUNDLE_FIXTURE,
     )
     template = assertions.Template.from_stack(stack)
     policies = template.find_resources("AWS::CloudFront::ResponseHeadersPolicy")
@@ -1264,4 +1272,82 @@ def test_api_stack_phase2c_stage_depends_on_throttled_routes(
     assert not missing, (
         "Stage RouteSettings reference routes without a DependsOn entry:\n  "
         + "\n  ".join(missing)
+    )
+
+
+def test_api_stack_phase2e_cors_credentials_with_strict_origins(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Phase 2e — `allow_credentials=True` requires a strict origin
+    allowlist (no `*` per CORS spec).  We list the localhost dev
+    origins in source and the production CloudFront origin via SSM.
+    """
+    template = _api_stack_template("dev", cdk_env)
+    apis = template.find_resources("AWS::ApiGatewayV2::Api")
+    assert len(apis) == 1, "expected exactly one HTTP API"
+    (api_props,) = apis.values()
+    cors = api_props["Properties"]["CorsConfiguration"]
+
+    assert cors.get("AllowCredentials") is True
+    origins = cors["AllowOrigins"]
+    assert isinstance(origins, list)
+    assert "*" not in origins, "wildcard origin is illegal with credentials=true"
+
+    assert "http://localhost:8081" in origins
+    assert "http://localhost:8082" in origins
+    assert "http://localhost:19006" in origins
+
+    # Production origin is CDK-resolved via SSM; the rendered template
+    # contains an `Fn::Join` that splices in the `Fn::GetAtt`/`Fn::Sub`
+    # for the parameter value.  Just assert that *some* entry contains
+    # an `Fn::Join` (i.e. is dynamic), so the CFN template will
+    # substitute the real domain at deploy time.
+    has_dynamic = any(
+        isinstance(o, dict) and ("Fn::Join" in o or "Fn::Sub" in o) for o in origins
+    )
+    assert has_dynamic, (
+        "production CloudFront origin should be a dynamic CFN reference, "
+        f"got origins: {origins!r}"
+    )
+
+    expose = cors.get("ExposeHeaders") or []
+    assert "x-request-id" in expose
+    assert "retry-after" in expose
+
+
+def test_web_stack_phase2e_invalidates_root(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Phase 2e — every deploy must invalidate `/*` so the SPA shell
+    refreshes immediately.  The hashed asset filenames Expo emits
+    make a wildcard invalidation safe (no over-cache risk).
+    """
+    app = cdk.App()
+    api = ApiStack(
+        app,
+        "Contricool-Dev-Api",
+        env=cdk_env,
+        env_name="dev",
+        snapstart=True,
+        log_retention_days=14,
+        xray_sampling_rate=1.0,
+        **_api_stack_auth_data_kwargs(app, cdk_env, env_name="dev"),
+    )
+    stack = WebStack(
+        app,
+        "Contricool-Dev-Web",
+        env=cdk_env,
+        env_name="dev",
+        api_gateway=api.api_gateway,
+        bundle_source_path=_WEB_BUNDLE_FIXTURE,
+    )
+    template = assertions.Template.from_stack(stack)
+    customs = template.find_resources("Custom::CDKBucketDeployment")
+    assert customs, "expected a CDKBucketDeployment custom resource"
+    paths_seen = [
+        props["Properties"].get("DistributionPaths") for props in customs.values()
+    ]
+    assert any(p == ["/*"] for p in paths_seen), (
+        "Phase 2e BucketDeployment must invalidate /* on every deploy; "
+        f"got DistributionPaths={paths_seen!r}"
     )

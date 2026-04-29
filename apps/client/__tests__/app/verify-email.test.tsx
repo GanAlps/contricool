@@ -47,7 +47,7 @@ describe('VerifyEmailScreen', () => {
   it('N7: INVALID_CODE shows banner', async () => {
     setSearchParams({ email: 'a@b.com' });
     server.use(
-      http.post('/v1/auth/verify-email', () =>
+      http.post('http://localhost/v1/auth/verify-email', () =>
         HttpResponse.json(
           { error: { code: 'INVALID_CODE', message: 'wrong', request_id: 'r' } },
           { status: 401 },
@@ -65,7 +65,7 @@ describe('VerifyEmailScreen', () => {
   it('N8: USER_NOT_FOUND shows the configured friendly banner', async () => {
     setSearchParams({ email: 'ghost@b.com' });
     server.use(
-      http.post('/v1/auth/verify-email', () =>
+      http.post('http://localhost/v1/auth/verify-email', () =>
         HttpResponse.json(
           { error: { code: 'USER_NOT_FOUND', message: 'nope', request_id: 'r' } },
           { status: 404 },
@@ -101,7 +101,7 @@ describe('VerifyEmailScreen', () => {
   it('Resend rate-limited surfaces a toast', async () => {
     setSearchParams({ email: 'a@b.com' });
     server.use(
-      http.post('/v1/auth/resend-email-code', () =>
+      http.post('http://localhost/v1/auth/resend-email-code', () =>
         HttpResponse.json(
           {
             error: {

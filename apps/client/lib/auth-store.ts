@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 
-import { setApiAuthAccessors } from './api';
 // Extensionless import: Metro's platform resolver picks
 // `auth-driver.web.ts` on web and `auth-driver.native.ts` on native
 // (the native impl ships in a later phase). Vitest is configured
@@ -24,6 +23,8 @@ export type AuthState = {
   forgotPassword: (input: { email: string }) => Promise<void>;
   resetPassword: (input: ResetPasswordInput) => Promise<void>;
   refreshSession: () => Promise<void>;
+  /** Phase 2e: SDK middleware calls this after a successful refresh. */
+  _setTokensFromRefresh: (accessToken: string, idToken: string) => void;
   _clear: () => void;
 };
 
@@ -99,6 +100,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
+  _setTokensFromRefresh: (accessToken, idToken) => {
+    const u = decodeIdToken(idToken);
+    set({ accessToken, idToken, user: u });
+  },
+
   _clear: () =>
     set({
       user: null,
@@ -107,15 +113,3 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       loading: false,
     }),
 }));
-
-// Wire api → store. Module-load-time call so the cycle resolves once.
-setApiAuthAccessors({
-  getAccessToken: () => useAuthStore.getState().accessToken,
-  setTokensFromRefresh: ({ access_token, id_token }) => {
-    const u = decodeIdToken(id_token);
-    useAuthStore.setState({ accessToken: access_token, idToken: id_token, user: u });
-  },
-  forceSignOut: async () => {
-    useAuthStore.getState()._clear();
-  },
-});

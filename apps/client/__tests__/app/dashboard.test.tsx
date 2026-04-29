@@ -78,7 +78,7 @@ describe('DashboardScreen', () => {
 
   it('N16: sign-out network failure clears state, surfaces a toast, and redirects', async () => {
     server.use(
-      http.post('/v1/auth/logout', () =>
+      http.post('http://localhost/v1/auth/logout', () =>
         HttpResponse.json(
           { error: { code: 'INTERNAL', message: 'oops', request_id: 'r' } },
           { status: 500 },

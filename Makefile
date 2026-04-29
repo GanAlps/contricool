@@ -42,13 +42,12 @@ infra-deploy-dev: ## Deploy CDK stacks to dev (CI-only, never from a laptop for 
 	@echo "Not yet implemented (Phase 1+)."
 	@exit 1
 
-openapi: ## Regenerate openapi.yaml + client-sdk types  [Phase 2+]
-	@echo "Not yet implemented (Phase 2+)."
-	@exit 1
+openapi: ## Regenerate openapi.yaml + client-sdk schema types
+	cd apps/api && /home/oshogupta/workspace/master-venv/bin/python scripts/emit_openapi.py
+	pnpm --filter @contricool/client-sdk build
 
-openapi-check: ## Verify checked-in openapi.yaml matches API code  [Phase 2+]
-	@echo "openapi-check: no-op until Phase 2."
-	@exit 0
+openapi-check: ## Drift-check the committed openapi.yaml vs the FastAPI app
+	cd apps/api && /home/oshogupta/workspace/master-venv/bin/python scripts/emit_openapi.py --check
 
 lint: ## Run ruff + mypy + biome + tsc on the workspace  [Phase 1+]
 	@echo "Not yet implemented (Phase 1+)."

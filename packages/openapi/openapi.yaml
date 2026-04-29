@@ -1,0 +1,500 @@
+components:
+  schemas:
+    ForgotPasswordRequest:
+      additionalProperties: false
+      properties:
+        email:
+          format: email
+          title: Email
+          type: string
+      required:
+      - email
+      title: ForgotPasswordRequest
+      type: object
+    ForgotPasswordResponse:
+      properties:
+        status:
+          const: RESET_CODE_SENT
+          enum:
+          - RESET_CODE_SENT
+          title: Status
+          type: string
+      required:
+      - status
+      title: ForgotPasswordResponse
+      type: object
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          title: Detail
+          type: array
+      title: HTTPValidationError
+      type: object
+    HealthResponse:
+      properties:
+        env:
+          title: Env
+          type: string
+        status:
+          title: Status
+          type: string
+        version:
+          title: Version
+          type: string
+      required:
+      - status
+      - env
+      - version
+      title: HealthResponse
+      type: object
+    LoginRequest:
+      additionalProperties: false
+      properties:
+        email:
+          format: email
+          title: Email
+          type: string
+        password:
+          maxLength: 256
+          minLength: 1
+          title: Password
+          type: string
+      required:
+      - email
+      - password
+      title: LoginRequest
+      type: object
+    LoginResponse:
+      properties:
+        access_token:
+          title: Access Token
+          type: string
+        expires_in:
+          title: Expires In
+          type: integer
+        id_token:
+          title: Id Token
+          type: string
+        user:
+          $ref: '#/components/schemas/LoginUser'
+      required:
+      - access_token
+      - id_token
+      - expires_in
+      - user
+      title: LoginResponse
+      type: object
+    LoginUser:
+      properties:
+        currency:
+          enum:
+          - USD
+          - INR
+          title: Currency
+          type: string
+        name:
+          title: Name
+          type: string
+        user_id:
+          title: User Id
+          type: string
+      required:
+      - user_id
+      - name
+      - currency
+      title: LoginUser
+      type: object
+    RefreshResponse:
+      properties:
+        access_token:
+          title: Access Token
+          type: string
+        expires_in:
+          title: Expires In
+          type: integer
+        id_token:
+          title: Id Token
+          type: string
+      required:
+      - access_token
+      - id_token
+      - expires_in
+      title: RefreshResponse
+      type: object
+    ResendEmailCodeRequest:
+      additionalProperties: false
+      properties:
+        email:
+          format: email
+          title: Email
+          type: string
+      required:
+      - email
+      title: ResendEmailCodeRequest
+      type: object
+    ResendEmailCodeResponse:
+      properties:
+        status:
+          const: RESENT
+          enum:
+          - RESENT
+          title: Status
+          type: string
+      required:
+      - status
+      title: ResendEmailCodeResponse
+      type: object
+    ResetPasswordRequest:
+      additionalProperties: false
+      properties:
+        code:
+          maxLength: 10
+          minLength: 4
+          title: Code
+          type: string
+        email:
+          format: email
+          title: Email
+          type: string
+        new_password:
+          maxLength: 256
+          minLength: 10
+          title: New Password
+          type: string
+      required:
+      - email
+      - code
+      - new_password
+      title: ResetPasswordRequest
+      type: object
+    ResetPasswordResponse:
+      properties:
+        password_reset:
+          title: Password Reset
+          type: boolean
+      required:
+      - password_reset
+      title: ResetPasswordResponse
+      type: object
+    SignupRequest:
+      additionalProperties: false
+      properties:
+        currency:
+          enum:
+          - USD
+          - INR
+          title: Currency
+          type: string
+        email:
+          format: email
+          title: Email
+          type: string
+        name:
+          maxLength: 128
+          minLength: 1
+          title: Name
+          type: string
+        password:
+          maxLength: 256
+          minLength: 10
+          title: Password
+          type: string
+        phone:
+          anyOf:
+          - pattern: ^\+[1-9]\d{1,14}$
+            type: string
+          - type: 'null'
+          title: Phone
+      required:
+      - email
+      - password
+      - name
+      - currency
+      title: SignupRequest
+      type: object
+    SignupResponse:
+      properties:
+        status:
+          const: PENDING_VERIFICATION
+          enum:
+          - PENDING_VERIFICATION
+          title: Status
+          type: string
+        user_id:
+          maxLength: 26
+          minLength: 26
+          title: User Id
+          type: string
+      required:
+      - user_id
+      - status
+      title: SignupResponse
+      type: object
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          title: Location
+          type: array
+        msg:
+          title: Message
+          type: string
+        type:
+          title: Error Type
+          type: string
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+      type: object
+    VerifyEmailRequest:
+      additionalProperties: false
+      properties:
+        code:
+          maxLength: 10
+          minLength: 4
+          title: Code
+          type: string
+        email:
+          format: email
+          title: Email
+          type: string
+      required:
+      - email
+      - code
+      title: VerifyEmailRequest
+      type: object
+    VerifyEmailResponse:
+      properties:
+        account_active:
+          title: Account Active
+          type: boolean
+        email_verified:
+          title: Email Verified
+          type: boolean
+      required:
+      - email_verified
+      - account_active
+      title: VerifyEmailResponse
+      type: object
+info:
+  description: ContriCool API — Phase 2c email-only auth backend (/v1/auth/*). Generated
+    from FastAPI; do not hand-edit.
+  title: ContriCool API
+  version: 0.0.1
+openapi: 3.1.0
+paths:
+  /auth/forgot-password:
+    post:
+      operationId: forgot_password_v1_auth_forgot_password_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForgotPasswordRequest'
+        required: true
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForgotPasswordResponse'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Forgot Password
+      tags:
+      - auth
+  /auth/login:
+    post:
+      operationId: login_v1_auth_login_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Login
+      tags:
+      - auth
+  /auth/logout:
+    post:
+      operationId: logout_v1_auth_logout_post
+      responses:
+        '204':
+          description: Successful Response
+      summary: Logout
+      tags:
+      - auth
+  /auth/refresh:
+    post:
+      operationId: refresh_v1_auth_refresh_post
+      parameters:
+      - in: cookie
+        name: rt
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Rt
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshResponse'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Refresh
+      tags:
+      - auth
+  /auth/resend-email-code:
+    post:
+      operationId: resend_email_code_v1_auth_resend_email_code_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResendEmailCodeRequest'
+        required: true
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResendEmailCodeResponse'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Resend Email Code
+      tags:
+      - auth
+  /auth/reset-password:
+    post:
+      operationId: reset_password_v1_auth_reset_password_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPasswordRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResetPasswordResponse'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Reset Password
+      tags:
+      - auth
+  /auth/signup:
+    post:
+      operationId: signup_v1_auth_signup_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest'
+        required: true
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignupResponse'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Signup
+      tags:
+      - auth
+  /auth/verify-email:
+    post:
+      operationId: verify_email_v1_auth_verify_email_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyEmailRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyEmailResponse'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Verify Email
+      tags:
+      - auth
+  /health:
+    get:
+      description: 'Return liveness + build metadata.
+
+
+        No DDB / Cognito / external calls — this endpoint is invoked by the
+
+        deploy smoke-test step and any external uptime monitor, so it must be
+
+        cheap and side-effect-free.'
+      operationId: health_v1_health_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+          description: Successful Response
+      summary: Health
+      tags:
+      - health

@@ -53,6 +53,9 @@ from aws_cdk import (
 from aws_cdk import (
     aws_logs as logs,
 )
+from aws_cdk import (
+    aws_ssm as ssm,
+)
 from constructs import Construct
 
 # Auth-bootstrap routes (Design 4 / Phase 2c) that are reachable
@@ -262,6 +265,33 @@ class ApiStack(Stack):
             version=self.lambda_function.current_version,
         )
 
+        # Phase 2e: cookie-based refresh requires `allow_credentials=true`
+        # which the CORS spec forbids alongside `*` origin.  We list:
+        #
+        # 1. The deployed CloudFront origin via SSM Dynamic Reference
+        #    (`{{resolve:ssm:/contricool/<env>/cloudfront-domain}}`).
+        #    CloudFormation resolves this at stack-update time, so the
+        #    parameter MUST exist before `cdk deploy` runs.  The deploy
+        #    workflow's "Pre-seed cloudfront-domain SSM" step ensures
+        #    this on first deploy by writing the placeholder
+        #    `placeholder.invalid`; subsequent deploys overwrite it
+        #    with the live CloudFront domain (via the "Write CloudFront
+        #    domain to SSM" step that runs *after* a successful deploy).
+        # 2. Localhost origins for `pnpm --filter @contricool/client dev:web`
+        #    so a developer running the SPA locally against the deployed
+        #    dev API can sign in / refresh.
+        cf_domain_param_name = f"/contricool/{env_name}/cloudfront-domain"
+        cloudfront_domain = ssm.StringParameter.value_for_string_parameter(
+            self,
+            cf_domain_param_name,
+        )
+        cors_origins = [
+            f"https://{cloudfront_domain}",
+            "http://localhost:8081",
+            "http://localhost:8082",
+            "http://localhost:19006",
+        ]
+
         # API Gateway HTTP API.
         self.api_gateway = apigwv2.HttpApi(
             self,
@@ -269,11 +299,12 @@ class ApiStack(Stack):
             api_name=f"contricool-api-{env_name}",
             description=f"ContriCool API ({env_name})",
             cors_preflight=apigwv2.CorsPreflightOptions(
-                # MVP web client is same-origin via CloudFront, so CORS at
-                # this layer is mostly defensive. Strict origin allowlist
-                # lives at the CloudFront response-headers policy.
-                allow_methods=[apigwv2.CorsHttpMethod.ANY],
-                allow_origins=["*"],
+                allow_methods=[
+                    apigwv2.CorsHttpMethod.GET,
+                    apigwv2.CorsHttpMethod.POST,
+                    apigwv2.CorsHttpMethod.OPTIONS,
+                ],
+                allow_origins=cors_origins,
                 allow_headers=[
                     "authorization",
                     "content-type",
@@ -281,6 +312,8 @@ class ApiStack(Stack):
                     "if-match",
                     "x-api-version",
                 ],
+                allow_credentials=True,
+                expose_headers=["x-request-id", "retry-after"],
                 max_age=Duration.minutes(10),
             ),
             disable_execute_api_endpoint=False,
