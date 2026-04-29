@@ -127,19 +127,21 @@ describe('useAuthStore', () => {
     });
   });
 
-  it('SDK 401-retry replays with new bearer + writes new tokens to store', async () => {
+  it('SDK 401-retry replays with new id token + writes new tokens to store', async () => {
+    const oldId = makeIdToken({ 'custom:user_id': 'u', name: 'A', 'custom:currency': 'USD' });
+    const newId = makeIdToken({ 'custom:user_id': 'u', name: 'A2', 'custom:currency': 'USD' });
     useAuthStore.setState({
       accessToken: 'old-tok',
-      idToken: makeIdToken({ 'custom:user_id': 'u', name: 'A', 'custom:currency': 'USD' }),
+      idToken: oldId,
       user: { user_id: 'u', name: 'A', currency: 'USD' },
       loading: false,
     });
     const bearers: (string | null)[] = [];
     server.use(
       http.get('http://localhost/v1/protected', ({ request }) => {
-        bearers.push(request.headers.get('authorization'));
         const auth = request.headers.get('authorization');
-        if (auth === 'Bearer new-tok') {
+        bearers.push(auth);
+        if (auth === `Bearer ${newId}`) {
           return HttpResponse.json({ ok: true });
         }
         return HttpResponse.json(
@@ -150,7 +152,7 @@ describe('useAuthStore', () => {
       http.post('http://localhost/v1/auth/refresh', () =>
         HttpResponse.json({
           access_token: 'new-tok',
-          id_token: makeIdToken({ 'custom:user_id': 'u', name: 'A2', 'custom:currency': 'USD' }),
+          id_token: newId,
           expires_in: 3600,
         }),
       ),
@@ -163,7 +165,9 @@ describe('useAuthStore', () => {
     ).GET('/protected');
     expect(useAuthStore.getState().accessToken).toBe('new-tok');
     expect(useAuthStore.getState().user?.name).toBe('A2');
-    expect(bearers).toEqual(['Bearer old-tok', 'Bearer new-tok']);
+    // Phase 2c two-token contract: id token rides in Authorization,
+    // not the access token.
+    expect(bearers).toEqual([`Bearer ${oldId}`, `Bearer ${newId}`]);
   });
 
   it('SDK clears store when refresh-and-retry fails', async () => {

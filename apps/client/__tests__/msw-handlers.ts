@@ -59,13 +59,26 @@ export const defaultHandlers = [
     ),
   ),
   http.post(`${BASE}/auth/logout`, async ({ request }) => {
-    // Phase 2c R6.1: logout is the authenticated /auth/* route.  The
-    // backend's JWT authorizer rejects without a bearer; mirror that
-    // here so future regressions show up as failing tests.
+    // Phase 2c R6.1 + PR #22 two-token contract: logout requires
+    //   Authorization: Bearer <id_token>
+    //   X-Cognito-Access-Token: <access_token>
+    // Mirror the backend so future client regressions show up here.
     if (!request.headers.get('authorization')?.startsWith('Bearer ')) {
       return HttpResponse.json(
         { error: { code: 'UNAUTHENTICATED', message: 'no bearer', request_id: 'r' } },
         { status: 401 },
+      );
+    }
+    if (!request.headers.get('x-cognito-access-token')) {
+      return HttpResponse.json(
+        {
+          error: {
+            code: 'MISSING_ACCESS_TOKEN',
+            message: 'access token required',
+            request_id: 'r',
+          },
+        },
+        { status: 400 },
       );
     }
     return new HttpResponse(null, { status: 204 });
