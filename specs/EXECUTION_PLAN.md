@@ -151,22 +151,30 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 
 ---
 
-## Phase 2 — Authentication & Identity
+## Phase 2 — Authentication & Identity ✅ COMPLETE 2026-04-29
 
-**Goal**: a user can sign up with email (phone optional, unverified), verify their email, log in, refresh their session, and see their own profile (name + currency). Aligned with **Designs 4, 7, 13** and the email-only auth scope in CONSTRAINTS.md.
+**Goal** (achieved): a user can sign up with email (phone optional, unverified), verify their email, log in, refresh their session, and see their own profile (name + currency). Aligned with **Designs 4, 7, 13** and the email-only auth scope in CONSTRAINTS.md.
 
 **Why next**: every subsequent feature requires authenticated callers.
 
-**Sub-phase rollout** (each lands as its own PR, gated by `deploy.yml`):
+**Sub-phase rollout** (each shipped as its own PR, gated by `deploy.yml`):
 
-| Sub-phase | Scope | Spec |
-|---|---|---|
-| 2a | CDK Auth + Data stacks + PII salt SSM | `specs/phase-2a-cognito-ddb-foundation/` ✅ shipped (PR #13) |
-| 2b | Backend `app/core/` (config, principal, observability, lookup_hash, middleware) | `specs/phase-2b-app-core/` |
-| 2c | Backend `auth` feature (signup/verify/login/refresh/forgot/reset + rate-limit + JWT verifier) | `specs/phase-2c-auth-feature/` |
-| 2c-followup | Powertools idempotency on `POST /v1/auth/signup` (deferred from 2c) | TBD — small PR |
-| 2d | Expo client foundation + auth screens | `specs/phase-2d-client-auth-foundation/` |
-| 2e | OpenAPI + SDK regen + end-to-end wiring | `specs/phase-2e-openapi-sdk-deploy/` |
+| Sub-phase | Scope | Spec | Status |
+|---|---|---|---|
+| 2a | CDK Auth + Data stacks + PII salt SSM | `specs/phase-2a-cognito-ddb-foundation/` | ✅ PR #13 |
+| 2b | Backend `app/core/` (config, principal, observability, lookup_hash, middleware) | `specs/phase-2b-app-core/` | ✅ PR #14 |
+| 2c | Backend `auth` feature (signup/verify/login/refresh/forgot/reset + rate-limit + JWT verifier) | `specs/phase-2c-auth-feature/` | ✅ PR #15 |
+| 2c-fixes | Stage→Route DependsOn (#16), Lambda version on code change (#17), Phase 2c deps in Lambda image (#18), USER_PASSWORD_AUTH on app clients (#19), 401-cause logging (#21), two-token pattern (#22) | inline | ✅ PRs #16–#22 |
+| 2d | Expo client foundation + auth screens | `specs/phase-2d-client-auth-foundation/` | ✅ PR #20 |
+| 2e | OpenAPI + SDK regen + production web deploy | `specs/phase-2e-openapi-sdk-deploy/` | ✅ PR #23 |
+| 2e-fixes | SDK bearer on /auth/logout (#24), id-token-in-Authorization two-token contract (#25), CORS allow `x-cognito-access-token` (#26) | inline | ✅ PRs #24–#26 |
+
+### Deferred follow-ups (small standalone PRs)
+
+- **Powertools idempotency on `POST /v1/auth/signup`** — original Phase 2c R1.5 deferral; not blocking real usage because Cognito rejects duplicates with `UsernameExistsException` → 409 `EMAIL_EXISTS`.
+- **Per-screen empty-form a11y test sweep** (Phase 2d NB2) — current N25 test only covers the generic Form component.
+- **Concurrent in-flight 401 dedup** (Phase 2e NB) — Phase 3 follow-up; Phase 2's auth surface only ever single-flights.
+- **`x-cognito-access-token` bypassing the JWT authorizer on OPTIONS preflight** — preflight currently returns 401 with the right CORS headers, which browsers accept but is cosmetically odd. Investigate when traffic justifies it.
 
 ### 2a — Cognito infrastructure (CDK Auth stack)
 
@@ -294,33 +302,40 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 
 ## Phase 3 — Friends
 
-**Goal**: User A adds User B by exact email or phone; both immediately see the friendship; either can remove. Aligned with **Designs 5, 6, 7** (simplified friendship model).
+**Goal**: User A adds User B by exact **email**; both immediately see the friendship; either can remove. Aligned with **Designs 5, 6, 7** (simplified friendship model) and CONSTRAINTS.md "Friend search/add is by email only at MVP."
+
+**Sub-phase rollout**:
+
+| Sub-phase | Scope | Spec |
+|---|---|---|
+| 3a | Backend `friends` feature (repo, service, routes, rate-limit, error mapping, tests) | TBD — `specs/phase-3a-friends-backend/` |
+| 3b | Frontend friends UI (list, detail, add-friend modal) consuming the regenerated SDK | TBD — `specs/phase-3b-friends-client/` |
 
 ### Tasks
 
-- [ ] **Backend `friends` feature** (`apps/api/app/features/friends/`):
-  - `repository.py` — canonical-pair friendship rows; lookup by hashed identifier via GSI1/GSI2.
+- [ ] **3a — Backend `friends` feature** (`apps/api/app/features/friends/`):
+  - `repository.py` — canonical-pair friendship rows; **email-hash GSI1 lookup only** (phone is unverified-metadata-only at MVP per CONSTRAINTS.md).
   - `service.py` — add (with USER_NOT_FOUND, CONFLICT, success), list, remove. Per-user rate-limit on add (30/hour).
   - `routes.py` — `POST /v1/friends/add`, `GET /v1/friends`, `DELETE /v1/friends/{user_id}`, `GET /v1/friends/{user_id}/balance` (returns 0 net for now — no transactions yet).
   - `policy.py` updates in `app/core/`: `is_friend(a, b)` helper.
-- [ ] **Frontend friends UI**:
-  - `(app)/friends/index.tsx` — friend list page with empty state.
-  - `(app)/friends/[userId].tsx` — friend detail; balance shows 0.
-  - "Add friend" sheet/modal triggered from friend list — identifier input, error handling for 404/409.
-- [ ] Update `make openapi`; regenerate SDK; CI gate.
+  - `make openapi` regenerates `packages/openapi/openapi.yaml` and SDK schema; CI drift gate.
+- [ ] **3b — Frontend friends UI** (`apps/client/app/(app)/friends/`):
+  - `index.tsx` — friend list page with empty state.
+  - `[userId].tsx` — friend detail; balance shows 0.
+  - "Add friend" sheet/modal triggered from friend list — email input, error handling for 404/409/422 (`INVALID_IDENTIFIER` if anything but email)/429.
 
 ### Phase-3 tests
 
 **Positive**:
 
 - Add friend by email → bilateral friendship row; both users in each other's `GET /v1/friends`.
-- Add friend by phone → same.
 - List friends → returns expected display name + since-date.
 - Remove friend → row gone; friend not in lists.
 
 **Negative (required)**:
 
-- Add with no matching email/phone → 404 USER_NOT_FOUND.
+- Add with non-email identifier (e.g. phone) → 400 `INVALID_IDENTIFIER` (CLAUDE.md red-line 3 entry: "Friend-add via phone identifier — reject 400 INVALID_IDENTIFIER (email-only at MVP)").
+- Add with no matching email → 404 USER_NOT_FOUND.
 - Add yourself → 422 SELF_ADD_FORBIDDEN.
 - Add an existing friend → 409 CONFLICT.
 - Add via missing/invalid Authorization → 401.
