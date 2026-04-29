@@ -17,9 +17,9 @@ from typing import Any
 # Skip the SSM cold-start fetch — emit doesn't need real config.
 os.environ.setdefault("CONTRICOOL_SKIP_COLD_START_CONFIG", "1")
 
-import yaml  # noqa: E402
+import yaml
 
-from app.main import app  # noqa: E402
+from app.main import app
 
 OUTPUT = Path(__file__).resolve().parents[3] / "packages" / "openapi" / "openapi.yaml"
 

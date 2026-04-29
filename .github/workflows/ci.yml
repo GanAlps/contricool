@@ -95,13 +95,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: "pnpm"
       - name: Install AWS CDK
         run: npm install -g aws-cdk
       - name: Install infra deps
         run: pip install -e 'apps/infra[dev]'
+      # Phase 2e: synth needs `apps/client/dist` for WebStack's
+      # BucketDeployment.  Build it the same way deploy.yml does so
+      # cdk-diff sees the actual artefact CFN would upload.
+      - name: Install workspace deps
+        run: pnpm install --frozen-lockfile
+      - name: Build SDK
+        run: pnpm --filter @contricool/client-sdk build
+      - name: Build Expo web bundle
+        run: pnpm --filter @contricool/client build:web
       - name: Configure AWS credentials (PR-readonly via OIDC)
         if: vars.AWS_DEPLOY_ROLE_PR_RO != ''
         uses: aws-actions/configure-aws-credentials@v4
