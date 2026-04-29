@@ -56,6 +56,7 @@ class WebStack(Stack):
         *,
         env_name: str,
         api_gateway: apigwv2.HttpApi,
+        bundle_source_path: str = "../client/dist",
         **kwargs: Any,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -208,16 +209,29 @@ class WebStack(Stack):
             },
         )
 
-        # Phase 1 placeholder deployment from apps/client/static/. Phase 2+
-        # switches the source path to ../client/dist (Expo web export).
+        # Phase 2e: serve the real Expo web bundle.  ../client/dist must
+        # exist before `cdk synth` runs — the deploy workflow runs
+        # `pnpm --filter @contricool/client build:web` first so the asset
+        # is present.  Locally, run the same command before `cdk synth`
+        # or the synth will error on the missing path.
+        #
+        # Cache strategy: 5-minute browser cache on every file via the
+        # default cache-control here, plus a `/*` invalidation on every
+        # deploy so the SPA shell flips immediately.  Hashed asset
+        # filenames (Expo's `dist/_expo/static/*`) are content-addressed,
+        # so the short max-age on those is harmless.  Phase 6 revisits
+        # with split per-prefix deploys once we have real traffic data.
         s3_deployment.BucketDeployment(
             self,
             "WebDeployment",
-            sources=[s3_deployment.Source.asset("../client/static")],
+            sources=[s3_deployment.Source.asset(bundle_source_path)],
             destination_bucket=self.bucket,
             distribution=self.distribution,
-            distribution_paths=["/index.html"],
-            cache_control=[s3_deployment.CacheControl.no_cache()],
+            distribution_paths=["/*"],
+            cache_control=[
+                s3_deployment.CacheControl.set_public(),
+                s3_deployment.CacheControl.max_age(Duration.minutes(5)),
+            ],
         )
 
         cdk.CfnOutput(
