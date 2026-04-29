@@ -311,6 +311,12 @@ class ApiStack(Stack):
                     "idempotency-key",
                     "if-match",
                     "x-api-version",
+                    # Phase 2c two-token contract (PR #22): /auth/logout
+                    # carries the raw access token here for Cognito
+                    # GlobalSignOut.  Without this entry the browser's
+                    # CORS preflight rejects the header before the
+                    # request even reaches the backend.
+                    "x-cognito-access-token",
                 ],
                 allow_credentials=True,
                 expose_headers=["x-request-id", "retry-after"],
