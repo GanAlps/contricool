@@ -696,11 +696,20 @@ def test_auth_stack_custom_user_id_attribute(cdk_env: cdk.Environment) -> None:
     assert constraints.get("MaxLength") == "26"
 
 
-def test_auth_stack_three_clients_no_secret_with_srp_only(
+def test_auth_stack_three_clients_no_secret_with_mvp_flows(
     cdk_env: cdk.Environment,
 ) -> None:
     """Three app clients (web/ios/android), all public (no secret), with
-    USER_SRP_AUTH + REFRESH_TOKEN_AUTH only."""
+    the MVP flow set: USER_SRP_AUTH + USER_PASSWORD_AUTH + REFRESH_TOKEN_AUTH.
+
+    USER_PASSWORD_AUTH is the MVP server-side login path per
+    ``specs/phase-2c-auth-feature/design.md`` Trade-off 1: at MVP the
+    web client posts plain JSON to the backend and the backend calls
+    ``InitiateAuth(USER_PASSWORD_AUTH)``. Phase 2d swaps the client to
+    Amplify SRP — both flows must coexist so the transition needs no
+    Cognito changes. ``ADMIN_USER_PASSWORD_AUTH`` stays forbidden; it
+    bypasses Cognito client validation entirely and is not used by the
+    backend."""
     template = _auth_stack("dev", cdk_env)
     clients = template.find_resources("AWS::Cognito::UserPoolClient")
     assert len(clients) == 3
@@ -710,16 +719,16 @@ def test_auth_stack_three_clients_no_secret_with_srp_only(
         props = c["Properties"]
         assert props.get("GenerateSecret") in (False, None)
         flows = set(props.get("ExplicitAuthFlows", []))
-        # CDK expands user_srp=True into ALLOW_USER_SRP_AUTH +
-        # ALLOW_REFRESH_TOKEN_AUTH plus CDK's framework helpers
-        # (ALLOW_REFRESH_TOKEN_AUTH always); we assert the SRP flow is on
-        # and the password-grant flows are off.
+        # CDK expands user_srp=True / user_password=True into the matching
+        # ALLOW_* tokens plus ALLOW_REFRESH_TOKEN_AUTH (always-on framework
+        # helper). All three are required at MVP.
         assert "ALLOW_USER_SRP_AUTH" in flows
+        assert "ALLOW_USER_PASSWORD_AUTH" in flows
         assert "ALLOW_REFRESH_TOKEN_AUTH" in flows
-        # Password-grant + admin flows MUST NOT be enabled — they bypass SRP.
+        # Admin flows MUST NOT be enabled — they bypass client validation.
         forbidden = {
-            "ALLOW_USER_PASSWORD_AUTH",
             "ALLOW_ADMIN_USER_PASSWORD_AUTH",
+            "ALLOW_CUSTOM_AUTH",
         }
         assert not (flows & forbidden), (
             f"Client {props['ClientName']} has forbidden flows: {flows & forbidden!r}"
