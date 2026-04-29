@@ -48,8 +48,8 @@ describe('webAuthDriver', () => {
     expect(r.id_token).toBe('id-jwt-2');
   });
 
-  it('signOut posts and resolves on 204', async () => {
-    useAuthStore.setState({ accessToken: 'access-jwt' });
+  it('signOut posts with both id-token Authorization + access-token header and resolves on 204', async () => {
+    useAuthStore.setState({ accessToken: 'access-jwt', idToken: 'id-jwt' });
     await expect(driver.signOut()).resolves.toBeUndefined();
   });
 

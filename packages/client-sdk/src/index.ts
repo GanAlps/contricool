@@ -10,8 +10,14 @@ export type { ApiError, ApiErrorDetail } from './errors';
 export type ClientOptions = {
   /** API base URL — usually `/v1` or `https://<host>/v1`. */
   baseUrl: string;
-  /** Returns the current access token (or null if signed out). */
-  getAccessToken: () => string | null;
+  /**
+   * Returns the current id and access tokens (or null if signed out).
+   *
+   * The middleware uses the **id token** in `Authorization: Bearer …`
+   * (Phase 2c two-token contract) and adds the **access token** to
+   * `X-Cognito-Access-Token` only on `/auth/logout`.
+   */
+  getTokens: () => { accessToken: string; idToken: string } | null;
   /**
    * Called when the 401-refresh-retry flow exhausts and the user
    * needs to be signed out locally.

@@ -36,8 +36,8 @@ describe('apiClient singleton', () => {
     expect(reimported).toBe(apiClient);
   });
 
-  it('attaches Bearer token from the store on non-/auth/ requests', async () => {
-    useAuthStore.setState({ accessToken: 'tok-123' });
+  it('attaches Bearer (id token) from the store on non-/auth/ requests', async () => {
+    useAuthStore.setState({ accessToken: 'tok-123', idToken: 'id-123' });
     let received: string | null = null;
     server.use(
       http.get('http://localhost/v1/me', ({ request }) => {
@@ -52,7 +52,8 @@ describe('apiClient singleton', () => {
         GET: (p: string) => Promise<{ data?: unknown }>;
       }
     ).GET('/me');
-    expect(received).toBe('Bearer tok-123');
+    // Phase 2c two-token contract: id token in Authorization.
+    expect(received).toBe('Bearer id-123');
   });
 
   it('updates the store when a 401 triggers a successful refresh', async () => {
