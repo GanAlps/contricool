@@ -1,5 +1,5 @@
 import { apiFetch } from './api';
-import type { AuthDriver } from './auth-driver';
+import type { AuthDriver } from './auth-driver-types';
 
 export const webAuthDriver: AuthDriver = {
   signUp: (input) => apiFetch('/auth/signup', { method: 'POST', json: input, auth: 'public' }),

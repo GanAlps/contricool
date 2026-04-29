@@ -57,6 +57,11 @@ export default defineConfig({
       '~': path.resolve(__dirname, '.'),
       'react-native': 'react-native-web',
     },
+    // Mirror Metro's platform-specific resolution so an extensionless
+    // import of './auth-driver' picks up './auth-driver.web.ts' (the
+    // same file the web target gets) rather than './auth-driver.ts'
+    // (the type-only interface).
+    extensions: ['.web.ts', '.web.tsx', '.web.js', '.ts', '.tsx', '.js'],
   },
   define: {
     __DEV__: 'true',

@@ -57,7 +57,7 @@ describe('useAuthStore', () => {
     expect(useAuthStore.getState().accessToken).toBeNull();
   });
 
-  it('signOut clears state even when driver throws (N16)', async () => {
+  it('signOut clears state and re-throws when driver throws (N16)', async () => {
     server.use(
       http.post('/v1/auth/logout', () =>
         HttpResponse.json(
@@ -72,8 +72,12 @@ describe('useAuthStore', () => {
       idToken: 'i',
       loading: false,
     });
-    await useAuthStore.getState().signOut();
+    await expect(useAuthStore.getState().signOut()).rejects.toMatchObject({
+      error: { code: 'INTERNAL' },
+    });
+    // State must still be cleared regardless.
     expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().accessToken).toBeNull();
   });
 
   it('refreshSession populates tokens + user on success (N14)', async () => {

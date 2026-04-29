@@ -1,7 +1,12 @@
 import { create } from 'zustand';
 
 import { setApiAuthAccessors } from './api';
-import driver from './auth-driver.web';
+// Extensionless import: Metro's platform resolver picks
+// `auth-driver.web.ts` on web and `auth-driver.native.ts` on native
+// (the native impl ships in a later phase). Vitest is configured
+// (vitest.config.ts) to prefer `.web.ts` so tests resolve to the web
+// implementation just like Metro does on the web target.
+import driver from './auth-driver';
 import { decodeIdToken } from './id-token';
 import type { AuthUser, ResetPasswordInput, SignupInput, VerifyEmailInput } from './types';
 
@@ -39,12 +44,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signOut: async () => {
+    let driverErr: unknown = null;
     try {
       await driver.signOut();
-    } catch {
-      // Always clear local state regardless of server response.
+    } catch (e) {
+      driverErr = e;
     }
+    // Always clear local state regardless of server response, then
+    // re-throw so the caller can surface a toast (R8.4).
     get()._clear();
+    if (driverErr) {
+      throw driverErr;
+    }
   },
 
   signUp: async (input) => {

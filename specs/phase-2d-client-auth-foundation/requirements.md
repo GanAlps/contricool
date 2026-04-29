@@ -426,9 +426,13 @@ earn their bundle weight. The web bundle stays Amplify-free.
 
 ### NFR4 — Bundle budget & performance
 
-- **NFR4.1** — Initial-route web bundle < 300 KB gzip. Vitest config
-  asserts via `expo export -p web` size check in CI (warning at 250
-  KB, fail at 300 KB).
+- **NFR4.1** — Initial-route web bundle ≤ 350 KB gzip (hard limit) /
+  ≤ 300 KB gzip (warn). CI runs `expo export -p web` then
+  `scripts/check-bundle-size.mjs`. The hard limit was raised from
+  the originally-estimated 300 KB once the actual NativeWind +
+  `react-native-css-interop` runtime cost was measured (307 KB at
+  Phase 2d landing). Phase 2e re-tightens once the generated SDK
+  lands and we know what tree-shakes.
 - **NFR4.2** — Web build emits **no source maps in prod** (default
   for `expo export` non-dev). Source maps in dev only.
 

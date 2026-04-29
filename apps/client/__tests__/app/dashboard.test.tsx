@@ -76,7 +76,7 @@ describe('DashboardScreen', () => {
     expect(useAuthStore.getState().user).toBeNull();
   });
 
-  it('N16: sign-out network failure still clears state, redirects, and toasts', async () => {
+  it('N16: sign-out network failure clears state, surfaces a toast, and redirects', async () => {
     server.use(
       http.post('/v1/auth/logout', () =>
         HttpResponse.json(
@@ -93,9 +93,11 @@ describe('DashboardScreen', () => {
     });
     renderDashboard();
     fireEvent.click(screen.getByTestId('dashboard-signout'));
+    expect(await screen.findByTestId('toast-error')).toBeInTheDocument();
     await waitFor(() =>
       expect(getRouterMock().calls).toContainEqual({ kind: 'replace', href: '/login' }),
     );
     expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().accessToken).toBeNull();
   });
 });

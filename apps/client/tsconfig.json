@@ -8,6 +8,10 @@
     "exactOptionalPropertyTypes": false,
     "module": "esnext",
     "moduleResolution": "bundler",
+    // Mirror Metro's platform-specific resolution.  Lets us write
+    // `import driver from './auth-driver'` and have TS pick up
+    // `auth-driver.web.ts` (the same file the web bundler picks up).
+    "moduleSuffixes": [".web", ""],
     "paths": {
       "~/*": ["./*"]
     },
