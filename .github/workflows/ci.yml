@@ -136,9 +136,45 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: openapi-check placeholder
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install API dev deps
         run: |
-          echo "openapi-check is a no-op until apps/api adds Pydantic models in Phase 2."
+          set -euo pipefail
+          pip install --upgrade pip
+          pip install -e 'apps/api[dev]'
+      - name: Drift check
+        working-directory: apps/api
+        run: python scripts/emit_openapi.py --check
+
+  client-sdk:
+    name: client-sdk
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+      - name: Install workspace deps
+        run: pnpm install --frozen-lockfile
+      - name: Generate schema (must match committed file)
+        run: pnpm --filter @contricool/client-sdk generate
+      - name: Drift check on src/schema.d.ts
+        run: |
+          set -euo pipefail
+          if ! git diff --exit-code packages/client-sdk/src/schema.d.ts; then
+            echo "::error::SDK schema is out of sync. Run \`make openapi\` and commit."
+            exit 1
+          fi
+      - name: Lint (Biome)
+        run: pnpm --filter @contricool/client-sdk lint
+      - name: Typecheck
+        run: pnpm --filter @contricool/client-sdk typecheck
+      - name: Test with coverage
+        run: pnpm --filter @contricool/client-sdk test:coverage
 
   client:
     name: client
@@ -154,6 +190,8 @@ jobs:
           cache: "pnpm"
       - name: Install workspace deps
         run: pnpm install --frozen-lockfile
+      - name: Build SDK (generates schema types)
+        run: pnpm --filter @contricool/client-sdk build
       - name: Lint (Biome)
         run: pnpm --filter @contricool/client lint
       - name: Typecheck

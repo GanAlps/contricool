@@ -1,0 +1,33 @@
+{
+  "name": "@contricool/client-sdk",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "clean": "rm -f src/schema.d.ts",
+    "generate": "openapi-typescript ../openapi/openapi.yaml -o src/schema.d.ts",
+    "build": "pnpm clean && pnpm generate",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.13.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@vitest/coverage-v8": "^2.1.8",
+    "jsdom": "^25.0.1",
+    "openapi-typescript": "^7.4.0",
+    "typescript": "~5.6.3",
+    "vitest": "^2.1.8"
+  }
+}
