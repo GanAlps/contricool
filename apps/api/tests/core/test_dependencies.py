@@ -63,11 +63,17 @@ def test_happy_path_returns_principal(seed_config: AppConfig) -> None:
     assert principal.token_use == "id"
 
 
-def test_access_token_also_works(seed_config: AppConfig) -> None:
+def test_access_token_in_authorization_rejected(seed_config: AppConfig) -> None:
+    """Authorization carries the id token. Real Cognito access tokens
+    lack ``custom:user_id`` / ``email`` / ``name`` and so cannot build
+    a Principal — reject them at the auth layer with a precise reason
+    rather than letting the failure surface as a downstream
+    "missing claim". The two-token logout flow puts the access token
+    in ``X-Cognito-Access-Token`` instead."""
     set_verifier_for_tests(build_verifier())
     token = mint_token(base_access_claims())
-    principal = _call(_request_with_auth(f"Bearer {token}"))
-    assert principal.token_use == "access"
+    with pytest.raises(UnauthenticatedError, match="id token"):
+        _call(_request_with_auth(f"Bearer {token}"))
 
 
 def test_missing_authorization_header_raises(seed_config: AppConfig) -> None:

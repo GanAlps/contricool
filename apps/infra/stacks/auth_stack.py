@@ -118,7 +118,17 @@ class AuthStack(Stack):
                 construct_id,
                 user_pool=self.user_pool,
                 user_pool_client_name=name,
-                auth_flows=cognito.AuthFlow(user_srp=True),
+                # USER_PASSWORD_AUTH is the MVP server-side login flow per
+                # ``specs/phase-2c-auth-feature/design.md`` Trade-off 1: at
+                # MVP the web client posts ``{email, password}`` JSON to
+                # ``POST /v1/auth/login`` and the backend calls
+                # ``InitiateAuth(USER_PASSWORD_AUTH, …)``. Phase 2d swaps
+                # the client to Amplify SRP and starts using the SRP flow
+                # transparently — both flows stay enabled so the
+                # transition needs no Cognito changes. ``ADMIN_*`` flows
+                # remain disabled (they bypass client validation and are
+                # not needed by the backend).
+                auth_flows=cognito.AuthFlow(user_srp=True, user_password=True),
                 prevent_user_existence_errors=True,
                 enable_token_revocation=True,
                 generate_secret=False,
