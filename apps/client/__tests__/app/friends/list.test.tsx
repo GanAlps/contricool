@@ -45,6 +45,9 @@ afterEach(() => {
 
 describe('FriendsListScreen — populated', () => {
   it('renders rows sorted alphabetically and routes on tap', async () => {
+    // Lowercase 'alice' is intentional: it proves the sort is
+    // case-insensitive (the screen uses `localeCompare(..., 'base')`),
+    // not just a typo.
     server.use(
       http.get('http://localhost/v1/friends', () =>
         HttpResponse.json(

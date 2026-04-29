@@ -56,6 +56,9 @@ describe('(app)/_layout top-bar nav', () => {
     expect(screen.getByTestId('navlink-friends').getAttribute('aria-current')).toBe('page');
   });
 
+  // N16 is also exercised by `auth-guards.test.tsx`; we keep an
+  // in-context copy here so a future refactor of the topbar renders
+  // a matching guard regression next to its companion tests.
   it('N16: unauthenticated visit redirects to /login', () => {
     render(<AppLayout />);
     expect(getRouterMock().calls).toContainEqual({ kind: 'replace', href: '/login' });

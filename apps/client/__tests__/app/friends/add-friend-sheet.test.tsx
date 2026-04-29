@@ -262,4 +262,26 @@ describe('AddFriendSheet — negatives', () => {
     expect(screen.getByTestId('add-friend-sheet')).toBeInTheDocument();
     expect(screen.getByTestId('add-friend-email')).toHaveValue('alice@example.com');
   });
+
+  it('clears the form when the sheet is cancel-and-reopened after an error', async () => {
+    server.use(
+      http.post('http://localhost/v1/friends/add', () =>
+        HttpResponse.json(
+          { error: { code: 'USER_NOT_FOUND', message: 'no', request_id: 'r' } },
+          { status: 404 },
+        ),
+      ),
+    );
+    renderScreen();
+    await openSheet();
+    fillEmail('ghost@example.com');
+    submit();
+    await waitFor(() => expect(screen.getByTestId('add-friend-error')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('add-friend-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('add-friend-sheet')).not.toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('friends-add-cta'));
+    await waitFor(() => expect(screen.getByTestId('add-friend-sheet')).toBeInTheDocument());
+    expect(screen.getByTestId('add-friend-email')).toHaveValue('');
+    expect(screen.queryByTestId('add-friend-error')).not.toBeInTheDocument();
+  });
 });

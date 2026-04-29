@@ -112,6 +112,9 @@ export const defaultHandlers = [
     ),
   ),
   http.post(`${BASE}/friends/add`, async ({ request }) => {
+    // `_email` is a leading-underscore echo for tests that want to
+    // assert the request body without intercepting the request — the
+    // SDK strips unknown keys, so it never reaches screens.
     const body = (await request.json()) as { email: string };
     return HttpResponse.json(
       {

@@ -1,6 +1,6 @@
+import { useEffect } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { Text, TextInput, View } from 'react-native';
-import type { z } from 'zod';
 
 import { zodResolver } from '@hookform/resolvers/zod';
 
@@ -44,10 +44,19 @@ export function AddFriendSheet({ open, onClose, onAdded }: Props) {
     reset,
     formState: { errors, isSubmitting },
   } = useForm<AddFriendValues>({
-    resolver: zodResolver(AddFriendSchema as unknown as z.ZodType<AddFriendValues>),
+    resolver: zodResolver(AddFriendSchema),
     defaultValues: { email: '' },
     mode: 'onSubmit',
   });
+
+  // Reset email + clear server errors whenever the sheet re-opens, so
+  // a previous attempt's stale value/error doesn't leak across
+  // open/close cycles (cancel-then-reopen, error-then-reopen).
+  useEffect(() => {
+    if (open) {
+      reset({ email: '' });
+    }
+  }, [open, reset]);
 
   const submit = handleSubmit(async (values) => {
     try {
