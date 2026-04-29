@@ -95,14 +95,18 @@ def find_user_by_email(email: str) -> str | None:
     Returns ``None`` when no user has registered that email — including
     the "user signed up but didn't verify" case (the META row + GSI1
     projection are written together in Phase 2c verify-email).
+
+    The auth feature writes ``GSI1SK = "USER#<user_id>"`` (see
+    ``auth.service._create_user_meta_row``); we use ``begins_with`` so
+    we don't depend on the trailing user_id when reading.
     """
     h = email_hash(email)
     response = _table().query(
         IndexName=_GSI1,
-        KeyConditionExpression="GSI1PK = :pk AND GSI1SK = :sk",
+        KeyConditionExpression="GSI1PK = :pk AND begins_with(GSI1SK, :sk)",
         ExpressionAttributeValues={
             ":pk": f"EMAIL#{h}",
-            ":sk": "USER",
+            ":sk": "USER#",
         },
         Limit=1,
     )
