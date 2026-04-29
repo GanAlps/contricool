@@ -1,12 +1,12 @@
 """Authorisation helpers.
 
-Phase 2b ships only ``is_self`` — the simplest authz check.
-``is_friend`` and ``can_edit_transaction`` are placeholders that raise
-``NotImplementedError`` so accidental usage in Phases 2-3 fails loudly
-rather than returning a wrong answer.
+Phase 2b shipped ``is_self``. Phase 3a wires ``is_friend`` to the
+canonical-pair friendship row on ``ContriCool-Users-<env>`` via the
+friends-feature repository — this keeps the friendship-row schema
+encapsulated in one place (Phase 4 transactions reuse this helper
+without re-implementing the lookup).
 
-Phases 3 and 5 wire the placeholders to ``ContriCool-Users-<env>`` and
-``ContriCool-Transactions-<env>`` respectively.
+``can_edit_transaction`` stays a placeholder until Phase 5.
 """
 from __future__ import annotations
 
@@ -19,10 +19,17 @@ def is_self(principal: Principal, target_user_id: str) -> bool:
 
 
 def is_friend(a_user_id: str, b_user_id: str) -> bool:
-    """Phase 3 wires this to ContriCool-Users-<env>."""
-    raise NotImplementedError(
-        "is_friend is not implemented until Phase 3 (friends feature)."
-    )
+    """True iff the two users have an active friendship.
+
+    Self-pair always returns False (you're never your own friend).
+    """
+    if a_user_id == b_user_id:
+        return False
+    # Local import: avoids a circular dependency at module load
+    # (friends.repository → app.core.config → … → app.core.policy).
+    from app.features.friends import repository as friends_repo
+
+    return friends_repo.friendship_exists(a_user_id, b_user_id)
 
 
 def can_edit_transaction(principal: Principal, txn: object) -> bool:
