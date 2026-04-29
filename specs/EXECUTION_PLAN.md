@@ -70,7 +70,7 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 
 ---
 
-## Phase 1 — AWS Account, OIDC & "Hello, World"
+## Phase 1 — AWS Account, OIDC & "Hello, World" ✅ COMPLETE 2026-04-29
 
 **Goal**: end-to-end CI/CD pipeline working — a placeholder static page on CloudFront default domain plus a `/v1/health` Lambda, deployed via GitHub Actions OIDC, rolled out dev → manual approval → prod, with budget/alarm scaffolding live.
 
@@ -108,10 +108,12 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 
 ### 1d — GitHub Actions skeleton
 
-- [ ] `.github/workflows/ci.yml` (PR + push to main): jobs `api-lint`, `api-test`, `infra-lint`, `infra-diff`, `web-lint` (skipped if no web yet), `security-scan` (`gitleaks`, `pip-audit`).
-- [ ] `.github/workflows/deploy.yml` (push to main): build Lambda image → push to ECR → assume `Contricool-CI-Dev-Deploy` via OIDC → `cdk deploy Contricool-Dev-*` → smoke test (curl `/v1/health`) → wait for `prod` environment approval → assume `Contricool-CI-Prod-Deploy` → `cdk deploy Contricool-Prod-*` → smoke test → tag release.
-- [ ] `.github/workflows/rollback.yml` (manual `workflow_dispatch`): given a previous tag, redeploy that Lambda image to prod's `live` alias.
-- [ ] GitHub repo variables `AWS_DEPLOY_ROLE_DEV`, `AWS_DEPLOY_ROLE_PROD`, `AWS_DEPLOY_ROLE_PR_RO`, `ECR_REPO_URI` set after Shared stack deploys (manually populated from CDK outputs once).
+### 1d — GitHub Actions skeleton ✅ COMPLETE (PR #6 + follow-ups #8/#10/#11; pipeline green at run 25082189963)
+
+- [x] `.github/workflows/ci.yml` (already shipped in Phase 0): jobs `gitleaks`, `lint`, `test`, `cdk-diff` (PR-only with PR-readonly OIDC role), `openapi-check` (placeholder until Phase 2).
+- [x] `.github/workflows/deploy.yml` (push to main): cdk deploy `Contricool-Dev-*` via OIDC → smoke `/v1/health` → wait for `prod` environment approval → cdk deploy `Contricool-Prod-*` (CDK reuses dev's content-addressed ECR image — no second build) → smoke `/v1/health` → push `release/YYYY-MM-DD-sha7` tag.
+- [x] `.github/workflows/rollback.yml` (manual `workflow_dispatch`): takes a `release/...` tag, validates format + main-ancestry, peels annotated tag to commit (`refs/tags/X^{}`) before merge-base check, runs `cdk deploy Contricool-Prod-*` from the rolled-back source. Operator runbook at `specs/runbooks/rollback.md`.
+- [x] GitHub repo variables `AWS_DEPLOY_ROLE_DEV/PROD/PR_RO`, `AWS_REGION`, `CONTRICOOL_ALERTS_EMAIL` and secret `AWS_ACCOUNT_ID` populated via `specs/runbooks/first-deploy.md`.
 
 ### 1e — Static "coming soon" page ✅ COMPLETE (bundled into PR #3)
 
@@ -125,15 +127,15 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 - `apps/infra/tests/test_aspects.py` — synthesize each stack and assert the BlockPublicAccess and reserved-concurrency Aspects fire.
 - CI smoke test — `curl https://d-<id>.cloudfront.net/v1/health` returns 200.
 
-### Phase-1 verification (manual)
+### Phase-1 verification (manual) ✅ COMPLETE 2026-04-29 at run 25082189963
 
-- [ ] Open the **dev CloudFront URL** in a browser → "ContriCool — coming soon" renders.
-- [ ] `curl https://d-<dev-id>.cloudfront.net/v1/health` → `200 {"status":"ok",...}`.
-- [ ] In GitHub Actions: deploy workflow finishes dev, waits for approval. Click "Approve" → prod deploys.
-- [ ] **Same checks against prod URL.**
-- [ ] Force a fake billing event by setting Budgets threshold to $0.01 → email arrives within ~24h. Reset to $20/$30.
-- [ ] In CloudWatch console, confirm alarm topic exists and is subscribed to email.
-- [ ] Manually invoke a "trigger 5xx" Lambda once to confirm the alarm-on-error path works (or wait until a real bug; either is fine).
+- [x] Open the **dev CloudFront URL** in a browser → "ContriCool — coming soon" renders.
+- [x] `curl https://<dev-cf-domain>/v1/health` → `200 {"status":"ok","env":"dev","version":"0.0.1"}`.
+- [x] In GitHub Actions: deploy workflow finishes dev, waits for approval. Click "Approve" → prod deploys.
+- [x] **Same checks against prod URL.** `200 {"status":"ok","env":"prod","version":"0.0.1"}`.
+- [x] In CloudWatch console, confirm alarm topic exists and is subscribed to email. (`Contricool-Alerts` SNS topic, subscription confirmed.)
+- [ ] **Deferred**: Force a fake billing event by setting Budgets threshold to $0.01 → email arrives within ~24h. (Not blocking; Budget is wired in CDK and will fire naturally as MTD approaches the $20/$30 thresholds.)
+- [ ] **Deferred**: Manually invoke a "trigger 5xx" Lambda once to confirm the alarm-on-error path works. (Phase 6 will exercise every alarm during the observability hardening pass.)
 
 ### Phase-1 deliverables
 
