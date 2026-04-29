@@ -24,13 +24,21 @@ ENV PORT=8080 \
 
 WORKDIR /app
 
-# Install Python deps. Pin matches apps/api/pyproject.toml.
+# Install Python deps. Pins must match the runtime ``[project] dependencies``
+# block in apps/api/pyproject.toml — drift here is caught by
+# ``apps/api/tests/test_dockerfile_deps.py``. The previous shorter list
+# silently shipped images without ``boto3`` once Phase 2c started using
+# it at cold start, breaking every Lambda invocation.
 COPY pyproject.toml ./
 RUN pip install --no-cache-dir \
         "fastapi==0.115.4" \
         "uvicorn==0.32.0" \
         "aws-lambda-powertools[parser,tracer]==3.3.0" \
-        "pydantic==2.9.2"
+        "pydantic[email]==2.9.2" \
+        "boto3>=1.35.0" \
+        "python-ulid>=2.7.0" \
+        "pyjwt[crypto]>=2.9.0" \
+        "cryptography>=43.0.0"
 
 # App source.
 COPY app ./app
