@@ -18,6 +18,7 @@ from app.core import config
 from app.core.middleware import install_core_middleware
 from app.features.auth import routes as auth_routes
 from app.features.auth.errors import install_error_handlers
+from app.features.friends import routes as friends_routes
 from app.routes import health
 
 
@@ -42,6 +43,7 @@ def create_app(*, load_config: bool = True) -> FastAPI:
     install_error_handlers(api)
     api.include_router(health.router, prefix="/v1", tags=["health"])
     api.include_router(auth_routes.router, prefix="/v1")
+    api.include_router(friends_routes.router, prefix="/v1")
     return api
 
 

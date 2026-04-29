@@ -82,6 +82,13 @@ _ROUTE_THROTTLES: dict[str, dict[str, int]] = {
         "ThrottlingRateLimit": 1,
         "ThrottlingBurstLimit": 5,
     },
+    # Phase 3a — friend-add carries an app-level rate-limit (30/h per
+    # requester); the API Gateway burst cap is the front-line abuse
+    # defense.
+    "POST /v1/friends/add": {
+        "ThrottlingRateLimit": 1,
+        "ThrottlingBurstLimit": 5,
+    },
 }
 
 # Cognito IAM actions the Lambda needs — enumerated, never ``*``.
@@ -214,15 +221,24 @@ class ApiStack(Stack):
                 resources=[user_pool.user_pool_arn],
             )
         )
-        # DDB: GetItem/PutItem/UpdateItem only — no Scan, no
-        # BatchWriteItem, no DeleteItem. ``grant`` (singular) keeps the
-        # action set tight; ``grant_read_write_data`` would add Scan +
+        # DDB: enumerated actions only — no ``*``, no Scan, no
+        # BatchWriteItem. ``grant`` (singular) keeps the action set
+        # tight; ``grant_read_write_data`` would add Scan +
         # BatchWriteItem which we explicitly reject.
+        #
+        # Phase 3a additions: ``Query`` (friend list — base + GSI1),
+        # ``BatchGetItem`` (hydrate friend names/currencies),
+        # ``DeleteItem`` (remove-friend). Canonical-pair friendship
+        # insert uses ``PutItem`` with ``attribute_not_exists(PK)``
+        # — single-item writes don't need TransactWriteItems.
         users_table.grant(
             self.lambda_function,
             "dynamodb:GetItem",
             "dynamodb:PutItem",
             "dynamodb:UpdateItem",
+            "dynamodb:Query",
+            "dynamodb:BatchGetItem",
+            "dynamodb:DeleteItem",
         )
 
         # X-Ray sampling rate is documented; concrete sampling rule lives in
@@ -408,6 +424,21 @@ class ApiStack(Stack):
             assert isinstance(cfn_route, cdk.CfnResource)
             cfn_route.add_property_override("AuthorizerId", cfn_authorizer.ref)
             cfn_route.add_property_override("AuthorizationType", "JWT")
+
+        # Phase 3a — explicit POST /v1/friends/add so per-route throttling
+        # can attach.  The remaining /v1/friends/* routes are served by
+        # the catch-all ``/{proxy+}`` (already JWT-authed above).
+        friends_add_routes = self.api_gateway.add_routes(
+            path="/v1/friends/add",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=integration,
+        )
+        for route in friends_add_routes:
+            cfn_route = route.node.default_child
+            assert isinstance(cfn_route, cdk.CfnResource)
+            cfn_route.add_property_override("AuthorizerId", cfn_authorizer.ref)
+            cfn_route.add_property_override("AuthorizationType", "JWT")
+            public_routes_by_key["POST /v1/friends/add"] = cfn_route
 
         # Stage-level throttling — defense in depth at API Gateway.
         # Values match CLAUDE.md red-line 2: 5,000 RPS / 10,000 burst,

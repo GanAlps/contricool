@@ -140,6 +140,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/friends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Friends Route */
+        get: operations["list_friends_route_v1_friends_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/friends/add": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add Friend Route */
+        post: operations["add_friend_route_v1_friends_add_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/friends/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Friend Route */
+        delete: operations["remove_friend_route_v1_friends__user_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/friends/{user_id}/balance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Friend Balance Route */
+        get: operations["get_friend_balance_route_v1_friends__user_id__balance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -168,6 +236,43 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AddFriendRequest
+         * @description Payload for ``POST /v1/friends/add``.
+         *
+         *     ``email`` is permissive ``str`` here so the service layer can
+         *     distinguish between a phone-shaped identifier (→ 400
+         *     ``INVALID_IDENTIFIER`` per CLAUDE.md red-line 3) and a malformed
+         *     email (→ 422 ``VALIDATION_ERROR``). Strict ``EmailStr`` would
+         *     collapse both into 422, losing the distinction.
+         *
+         *     Phone is unverified-metadata-only on Cognito and is never used
+         *     for lookup (CONSTRAINTS.md "email-only at MVP").
+         */
+        AddFriendRequest: {
+            /** Email */
+            email: string;
+        };
+        /**
+         * AddFriendResponse
+         * @description ``POST /v1/friends/add`` 200 response — same shape as a list row.
+         */
+        AddFriendResponse: {
+            /**
+             * Currency
+             * @enum {string}
+             */
+            currency: "USD" | "INR";
+            /** Name */
+            name: string;
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+            /** User Id */
+            user_id: string;
+        };
         /** ForgotPasswordRequest */
         ForgotPasswordRequest: {
             /**
@@ -185,6 +290,52 @@ export interface components {
              */
             status: "RESET_CODE_SENT";
         };
+        /**
+         * FriendBalanceResponse
+         * @description ``GET /v1/friends/{user_id}/balance`` 200 response.
+         *
+         *     Phase 3a returns the fully-typed shape with zeros / ``null`` so
+         *     Phase 3b's UI can render the eventual balance card without
+         *     re-architecting when Phase 4 wires real transaction aggregates.
+         */
+        FriendBalanceResponse: {
+            /**
+             * Currency
+             * @enum {string}
+             */
+            currency: "USD" | "INR";
+            /** Last Transaction At */
+            last_transaction_at?: string | null;
+            /** Net */
+            net: string;
+            /**
+             * Settlement Status
+             * @enum {string}
+             */
+            settlement_status: "settled" | "friend_owes" | "you_owe";
+            /** User Id */
+            user_id: string;
+        };
+        /**
+         * FriendItem
+         * @description One row in the friends list — the friend's identity-safe shape.
+         */
+        FriendItem: {
+            /**
+             * Currency
+             * @enum {string}
+             */
+            currency: "USD" | "INR";
+            /** Name */
+            name: string;
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+            /** User Id */
+            user_id: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -198,6 +349,19 @@ export interface components {
             status: string;
             /** Version */
             version: string;
+        };
+        /**
+         * ListFriendsResponse
+         * @description ``GET /v1/friends`` 200 response.
+         *
+         *     ``next_cursor`` is opaque (HMAC-signed, requester-bound). When
+         *     ``null`` the caller has reached the end of their friend list.
+         */
+        ListFriendsResponse: {
+            /** Items */
+            items: components["schemas"]["FriendItem"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
         };
         /** LoginRequest */
         LoginRequest: {
@@ -573,6 +737,131 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VerifyEmailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_friends_route_v1_friends_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListFriendsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_friend_route_v1_friends_add_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddFriendRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddFriendResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_friend_route_v1_friends__user_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_friend_balance_route_v1_friends__user_id__balance_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FriendBalanceResponse"];
                 };
             };
             /** @description Validation Error */

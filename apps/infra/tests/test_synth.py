@@ -1166,29 +1166,58 @@ def test_api_stack_phase2c_lambda_iam_cognito_actions_enumerated(
     )
 
 
-def test_api_stack_phase2c_lambda_iam_ddb_actions_enumerated(
+def test_api_stack_lambda_iam_ddb_actions_enumerated(
     cdk_env: cdk.Environment,
 ) -> None:
-    """Lambda IAM grants on the Users table cover only Get/Put/Update —
-    no Scan, no DeleteItem, no BatchWriteItem (N32)."""
+    """Lambda IAM grants on the Users table cover the enumerated set —
+    no wildcards, no Scan, no BatchWriteItem (Phase 2c N32 + Phase 3a
+    additions)."""
     import json
 
     template = _api_stack_template("dev", cdk_env)
     policies = template.find_resources("AWS::IAM::Policy")
     blob = json.dumps(list(policies.values()))
 
-    for action in ("dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"):
+    # Phase 2c required + Phase 3a additions.
+    for action in (
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:Query",
+        "dynamodb:BatchGetItem",
+        "dynamodb:DeleteItem",
+    ):
         assert action in blob, f"Lambda IAM missing required DDB action {action!r}"
 
-    # Forbidden actions.
+    # Forbidden actions — no wildcards, no Scan, no BatchWriteItem,
+    # no TransactWriteItems (canonical-pair Put with cond suffices),
+    # no ConditionCheckItem (only useful inside transactions).
     for action in (
         "dynamodb:Scan",
-        "dynamodb:DeleteItem",
         "dynamodb:BatchWriteItem",
+        "dynamodb:TransactWriteItems",
+        "dynamodb:ConditionCheckItem",
+        '"dynamodb:*"',  # quoted to avoid matching enumerated actions
     ):
         assert action not in blob, (
             f"Lambda IAM must NOT grant {action!r} on the Users table"
         )
+
+
+def test_api_stack_phase3a_friends_add_throttled(
+    cdk_env: cdk.Environment,
+) -> None:
+    """N31: ``POST /v1/friends/add`` is in the synthesised Stage's
+    RouteSettings (per-route throttle attached)."""
+    template = _api_stack_template("dev", cdk_env)
+    stages = template.find_resources("AWS::ApiGatewayV2::Stage")
+    assert len(stages) == 1
+    (stage_props,) = stages.values()
+    route_settings = stage_props["Properties"].get("RouteSettings", {})
+    assert "POST /v1/friends/add" in route_settings
+    settings = route_settings["POST /v1/friends/add"]
+    assert settings.get("ThrottlingRateLimit") == 1
+    assert settings.get("ThrottlingBurstLimit") == 5
 
 
 def test_api_stack_phase2c_no_unprotected_non_public_routes(

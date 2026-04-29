@@ -1,5 +1,60 @@
 components:
   schemas:
+    AddFriendRequest:
+      additionalProperties: false
+      description: 'Payload for ``POST /v1/friends/add``.
+
+
+        ``email`` is permissive ``str`` here so the service layer can
+
+        distinguish between a phone-shaped identifier (→ 400
+
+        ``INVALID_IDENTIFIER`` per CLAUDE.md red-line 3) and a malformed
+
+        email (→ 422 ``VALIDATION_ERROR``). Strict ``EmailStr`` would
+
+        collapse both into 422, losing the distinction.
+
+
+        Phone is unverified-metadata-only on Cognito and is never used
+
+        for lookup (CONSTRAINTS.md "email-only at MVP").'
+      properties:
+        email:
+          maxLength: 320
+          minLength: 1
+          title: Email
+          type: string
+      required:
+      - email
+      title: AddFriendRequest
+      type: object
+    AddFriendResponse:
+      description: '``POST /v1/friends/add`` 200 response — same shape as a list row.'
+      properties:
+        currency:
+          enum:
+          - USD
+          - INR
+          title: Currency
+          type: string
+        name:
+          title: Name
+          type: string
+        since:
+          format: date-time
+          title: Since
+          type: string
+        user_id:
+          title: User Id
+          type: string
+      required:
+      - user_id
+      - name
+      - currency
+      - since
+      title: AddFriendResponse
+      type: object
     ForgotPasswordRequest:
       additionalProperties: false
       properties:
@@ -22,6 +77,74 @@ components:
       required:
       - status
       title: ForgotPasswordResponse
+      type: object
+    FriendBalanceResponse:
+      description: '``GET /v1/friends/{user_id}/balance`` 200 response.
+
+
+        Phase 3a returns the fully-typed shape with zeros / ``null`` so
+
+        Phase 3b''s UI can render the eventual balance card without
+
+        re-architecting when Phase 4 wires real transaction aggregates.'
+      properties:
+        currency:
+          enum:
+          - USD
+          - INR
+          title: Currency
+          type: string
+        last_transaction_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Last Transaction At
+        net:
+          title: Net
+          type: string
+        settlement_status:
+          enum:
+          - settled
+          - friend_owes
+          - you_owe
+          title: Settlement Status
+          type: string
+        user_id:
+          title: User Id
+          type: string
+      required:
+      - user_id
+      - currency
+      - net
+      - settlement_status
+      title: FriendBalanceResponse
+      type: object
+    FriendItem:
+      description: One row in the friends list — the friend's identity-safe shape.
+      properties:
+        currency:
+          enum:
+          - USD
+          - INR
+          title: Currency
+          type: string
+        name:
+          title: Name
+          type: string
+        since:
+          format: date-time
+          title: Since
+          type: string
+        user_id:
+          title: User Id
+          type: string
+      required:
+      - user_id
+      - name
+      - currency
+      - since
+      title: FriendItem
       type: object
     HTTPValidationError:
       properties:
@@ -48,6 +171,28 @@ components:
       - env
       - version
       title: HealthResponse
+      type: object
+    ListFriendsResponse:
+      description: '``GET /v1/friends`` 200 response.
+
+
+        ``next_cursor`` is opaque (HMAC-signed, requester-bound). When
+
+        ``null`` the caller has reached the end of their friend list.'
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/FriendItem'
+          title: Items
+          type: array
+        next_cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Next Cursor
+      required:
+      - items
+      title: ListFriendsResponse
       type: object
     LoginRequest:
       additionalProperties: false
@@ -477,6 +622,116 @@ paths:
       summary: Verify Email
       tags:
       - auth
+  /friends:
+    get:
+      operationId: list_friends_route_v1_friends_get
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          default: 50
+          maximum: 100
+          minimum: 1
+          title: Limit
+          type: integer
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListFriendsResponse'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: List Friends Route
+      tags:
+      - friends
+  /friends/add:
+    post:
+      operationId: add_friend_route_v1_friends_add_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddFriendRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddFriendResponse'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Add Friend Route
+      tags:
+      - friends
+  /friends/{user_id}:
+    delete:
+      operationId: remove_friend_route_v1_friends__user_id__delete
+      parameters:
+      - in: path
+        name: user_id
+        required: true
+        schema:
+          title: User Id
+          type: string
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Remove Friend Route
+      tags:
+      - friends
+  /friends/{user_id}/balance:
+    get:
+      operationId: get_friend_balance_route_v1_friends__user_id__balance_get
+      parameters:
+      - in: path
+        name: user_id
+        required: true
+        schema:
+          title: User Id
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FriendBalanceResponse'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Get Friend Balance Route
+      tags:
+      - friends
   /health:
     get:
       description: 'Return liveness + build metadata.
