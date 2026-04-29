@@ -165,6 +165,7 @@ def test_refresh_bad_cookie_401_clears_cookie(
         "/v1/auth/refresh", cookies={"rt": "tampered-token-value"}
     )
     assert r.status_code == 401
+    assert r.json()["error"]["code"] == "REFRESH_FAILED"
     # Cookie clear on bad refresh.
     set_cookie = r.headers.get("set-cookie", "")
     assert "rt=" in set_cookie

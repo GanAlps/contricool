@@ -101,7 +101,16 @@ def _path_aware_not_authorized(path: str) -> AuthError:
             http_status=401,
             message="Email or password is incorrect.",
         )
-    # refresh / logout / forgot / reset and generic
+    if path == "refresh":
+        # Distinct from generic UNAUTHENTICATED so the SDK can route
+        # "session expired" UX separately from "bad bearer token" —
+        # see Design 4 R5.4 / Phase 2c spec N15.
+        return AuthError(
+            code="REFRESH_FAILED",
+            http_status=401,
+            message="Refresh token is invalid or expired.",
+        )
+    # logout / forgot / reset and generic
     return AuthError(
         code="UNAUTHENTICATED",
         http_status=401,

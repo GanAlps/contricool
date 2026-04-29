@@ -94,10 +94,18 @@ def signup(req: SignupRequest) -> SignupResponse:
             password=req.password,
             attributes=attrs,
         )
-    except AuthError:
+    except AuthError as e:
         # Re-raise so routes layer turns it into the right envelope.
-        # No PII in logs — only the error class name.
-        logger.warning("signup_failed", extra={"event": "signup"})
+        # No PII in logs — only the error code. EMAIL_EXISTS is a
+        # normal duplicate-signup attempt, not an operational failure;
+        # log at INFO so any WARNING+ alarms don't fire on it.
+        if e.code == "EMAIL_EXISTS":
+            logger.info("signup_email_exists", extra={"event": "signup"})
+        else:
+            logger.warning(
+                "signup_failed",
+                extra={"event": "signup", "auth_error_code": e.code},
+            )
         raise
 
     logger.info("signup_started", extra={"event": "signup", "user_id": user_id})

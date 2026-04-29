@@ -1172,3 +1172,46 @@ def test_api_stack_phase2c_lambda_iam_ddb_actions_enumerated(
         assert action not in blob, (
             f"Lambda IAM must NOT grant {action!r} on the Users table"
         )
+
+
+def test_api_stack_phase2c_no_unprotected_non_public_routes(
+    cdk_env: cdk.Environment,
+) -> None:
+    """N33 negative: every synthesised route is either in the
+    ``_PUBLIC_AUTH_PATHS`` set (plus ``/v1/health``) or carries
+    ``AuthorizationType=JWT``.
+
+    A future CDK refactor that drops the authorizer override on
+    ``/{proxy+}`` or ``/v1/auth/logout`` would silently expose every
+    authenticated endpoint to anonymous traffic — this test is the
+    backstop.
+    """
+    template = _api_stack_template("dev", cdk_env)
+    routes = template.find_resources("AWS::ApiGatewayV2::Route")
+    public_route_keys = {
+        "POST /v1/auth/signup",
+        "POST /v1/auth/verify-email",
+        "POST /v1/auth/resend-email-code",
+        "POST /v1/auth/login",
+        "POST /v1/auth/refresh",
+        "POST /v1/auth/forgot-password",
+        "POST /v1/auth/reset-password",
+        "GET /v1/health",
+    }
+    offenders: list[str] = []
+    for props in routes.values():
+        rk = props["Properties"].get("RouteKey", "")
+        auth_type = props["Properties"].get("AuthorizationType", "NONE")
+        authorizer_id = props["Properties"].get("AuthorizerId")
+        # A public route is fine. Otherwise the route MUST have
+        # AuthorizationType=JWT and an AuthorizerId reference.
+        if rk in public_route_keys:
+            continue
+        if auth_type != "JWT" or not authorizer_id:
+            offenders.append(
+                f"{rk!r}: AuthorizationType={auth_type!r}, AuthorizerId={authorizer_id!r}"
+            )
+    assert not offenders, (
+        "Found non-public routes without JWT authorizer attached:\n  "
+        + "\n  ".join(offenders)
+    )

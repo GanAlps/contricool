@@ -94,9 +94,16 @@ Phase 2d/2e.
 - **R1.4** — On success returns **202 Accepted** with body
   `{user_id, status: "PENDING_VERIFICATION"}`. The `user_id` is the
   generated ULID, **not** Cognito's `sub`.
-- **R1.5** — Idempotency: when an `Idempotency-Key` header is supplied
-  (UUIDv4), the response is cached for 24h keyed by `(client_ip + email +
-  key)` so a network retry does not create duplicate Cognito users.
+- **R1.5 (DEFERRED to a follow-up)** — Idempotency-Key support on
+  signup is **deferred** out of Phase 2c. Rationale: Cognito itself
+  rejects duplicate signups with `UsernameExistsException` → 409
+  `EMAIL_EXISTS`, so a retry never creates a duplicate user. The only
+  thing strict idempotency would buy us is returning the *same*
+  202 body on retry (instead of the current 409 on retry), which is
+  ergonomic — not a security or correctness concern. We'll add
+  Powertools `idempotent_function` in a small follow-up PR once the
+  full `signup_with_pending` flow has stabilised in dev. Tracked in
+  `specs/EXECUTION_PLAN.md` under "Phase 2c follow-ups".
 - **R1.6** — Error mapping:
   - Cognito `UsernameExistsException` → **409** `EMAIL_EXISTS`.
   - Cognito `InvalidPasswordException` → **422** `INVALID_PASSWORD` with
@@ -364,13 +371,10 @@ distinct test function in `apps/api/tests/features/auth/test_<area>.py`
   6th call 429s).
 - N26 — Rate-limit `Retry-After` header is `<= 3600` and `> 0`.
 
-### Idempotency negatives
+### Idempotency negatives — DEFERRED
 
-- N27 — Signup with same `Idempotency-Key` returns the **cached** 202
-  body, **not** a new Cognito user (assert `SignUp` boto3 client called
-  exactly once).
-- N28 — Signup with same key but **different body** → 422
-  `IDEMPOTENCY_KEY_MISMATCH` (Powertools default behaviour).
+- ~~N27~~ — Deferred with R1.5; covered when idempotency lands.
+- ~~N28~~ — Deferred with R1.5.
 
 ### Logging negatives
 

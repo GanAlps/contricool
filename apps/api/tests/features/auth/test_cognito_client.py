@@ -332,7 +332,7 @@ def test_login_unconfirmed_returns_account_not_active(
 # ---- initiate_auth (refresh) -----------------------------------------
 
 
-def test_refresh_with_bad_token_maps_to_unauthenticated(
+def test_refresh_with_bad_token_maps_to_refresh_failed(
     cognito: cc.CognitoClient, moto_cognito: dict[str, str]
 ) -> None:
     with pytest.raises(AuthError) as excinfo:
@@ -340,8 +340,10 @@ def test_refresh_with_bad_token_maps_to_unauthenticated(
             client_id=moto_cognito["client_id"],
             refresh_token="not-a-real-refresh-token",
         )
-    # moto raises NotAuthorizedException; refresh path maps to UNAUTHENTICATED.
-    assert excinfo.value.code == "UNAUTHENTICATED"
+    # moto raises NotAuthorizedException; per Spec R5.4 / N15 the
+    # refresh path maps to REFRESH_FAILED so SDK clients can route
+    # "session expired" UX separately from generic 401 UNAUTHENTICATED.
+    assert excinfo.value.code == "REFRESH_FAILED"
     assert excinfo.value.http_status == 401
 
 
@@ -445,8 +447,18 @@ def test_not_authorized_login_path_maps_to_invalid_credentials() -> None:
     assert err.code == "INVALID_CREDENTIALS"
 
 
-def test_not_authorized_refresh_path_maps_to_unauthenticated() -> None:
+def test_not_authorized_refresh_path_maps_to_refresh_failed() -> None:
+    """Spec R5.4 / N15: refresh path needs its own error code so SDK
+    can distinguish from generic 401 UNAUTHENTICATED."""
     err = cc._map_error(_make_client_error("NotAuthorizedException"), path="refresh")
+    assert err.code == "REFRESH_FAILED"
+    assert err.http_status == 401
+
+
+def test_not_authorized_logout_path_still_maps_to_unauthenticated() -> None:
+    """Logout / forgot / reset retain UNAUTHENTICATED — only refresh
+    branches off."""
+    err = cc._map_error(_make_client_error("NotAuthorizedException"), path="logout")
     assert err.code == "UNAUTHENTICATED"
 
 

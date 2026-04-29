@@ -91,12 +91,18 @@ def test_login_does_not_log_password_or_tokens(
             "password": _SECRETS["leaked_password"],
         },
     )
-    if response.status_code == 200:
-        leaked_token = response.json()["access_token"]
-        text = "\n".join(
-            rec.getMessage() + " " + str(rec.__dict__) for rec in caplog.records
-        )
-        assert leaked_token not in text, "access_token leaked into logs"
+    # The fixture confirmed the user and wrote the META row, so login
+    # is expected to succeed. Asserting 200 explicitly removes the
+    # silent escape hatch where a non-200 would skip the leak check.
+    assert response.status_code == 200, (
+        f"login expected to succeed; got {response.status_code} "
+        f"body={response.text!r}"
+    )
+    leaked_token = response.json()["access_token"]
+    text = "\n".join(
+        rec.getMessage() + " " + str(rec.__dict__) for rec in caplog.records
+    )
+    assert leaked_token not in text, "access_token leaked into logs"
     _assert_no_secrets(caplog)
 
 
