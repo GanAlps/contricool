@@ -50,6 +50,71 @@ def test_batch_get_user_metas_partial_hit(friends_env: dict[str, object]) -> Non
     assert "01J-ghost" not in out
 
 
+def test_batch_get_user_metas_retries_on_unprocessed_keys(
+    friends_env: dict[str, object],
+) -> None:
+    """B4: DDB BatchGetItem returns UnprocessedKeys under throttle. The
+    repository must retry on the residual; otherwise friends silently
+    vanish from list pages."""
+    from unittest.mock import MagicMock, patch
+
+    import boto3 as real_boto3
+
+    fake = MagicMock()
+    fake.batch_get_item.side_effect = [
+        {
+            "Responses": {
+                "ContriCool-Users-test": [
+                    {"PK": "USER#01J-a", "display_name": "A", "currency": "USD"}
+                ]
+            },
+            "UnprocessedKeys": {
+                "ContriCool-Users-test": {
+                    "Keys": [{"PK": "USER#01J-b", "SK": "META"}]
+                }
+            },
+        },
+        {
+            "Responses": {
+                "ContriCool-Users-test": [
+                    {"PK": "USER#01J-b", "display_name": "B", "currency": "USD"}
+                ]
+            },
+            "UnprocessedKeys": {},
+        },
+    ]
+    with patch.object(real_boto3, "resource", return_value=fake):
+        out = repo.batch_get_user_metas(["01J-a", "01J-b"])
+    assert set(out.keys()) == {"01J-a", "01J-b"}
+    assert fake.batch_get_item.call_count == 2
+
+
+def test_batch_get_user_metas_raises_when_retries_exhausted(
+    friends_env: dict[str, object],
+) -> None:
+    """B4: persistent UnprocessedKeys → raise rather than silently drop."""
+    from unittest.mock import MagicMock, patch
+
+    import boto3 as real_boto3
+    from botocore.exceptions import ClientError
+
+    fake = MagicMock()
+    fake.batch_get_item.return_value = {
+        "Responses": {"ContriCool-Users-test": []},
+        "UnprocessedKeys": {
+            "ContriCool-Users-test": {
+                "Keys": [{"PK": "USER#01J-x", "SK": "META"}]
+            }
+        },
+    }
+    with patch.object(real_boto3, "resource", return_value=fake):
+        with pytest.raises(ClientError) as exc:
+            repo.batch_get_user_metas(["01J-x"])
+    assert "ProvisionedThroughputExceededException" in str(exc.value)
+    # Bounded retries (4 attempts: 1 initial + 3 retries).
+    assert fake.batch_get_item.call_count == 4
+
+
 def test_create_friendship_happy(friends_env: dict[str, object]) -> None:
     when = repo.create_friendship("01J-a", "01J-b", created_by="01J-a")
     assert when is not None

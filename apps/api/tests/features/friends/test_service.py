@@ -13,12 +13,13 @@ from app.features.friends.errors import UserNotFoundError
 from .conftest import seed_friendship, seed_user
 
 
-def test_add_meta_missing_post_create_raises_user_not_found(
+def test_add_meta_missing_pre_create_raises_user_not_found(
     friends_env: dict[str, object],
 ) -> None:
-    """Defensive branch: GSI1 lookup hit, friendship written, but the
-    META row vanished mid-request. Service surfaces 404 rather than a
-    fictional success."""
+    """Defensive branch: GSI1 lookup hit but the META row is missing
+    at read time (race or partial-write). The service raises
+    USER_NOT_FOUND BEFORE writing the friendship row, so no orphan
+    row is left behind to block future re-adds (B2 from the review)."""
     seed_user(friends_env, user_id="01HKAAA000000000000000000R", email="r@b.com", name="R")
     seed_user(friends_env, user_id="01HKBBB000000000000000000T", email="t@b.com", name="T")
     with patch.object(repo, "get_user_meta", return_value=None):
@@ -27,6 +28,10 @@ def test_add_meta_missing_post_create_raises_user_not_found(
                 requester_id="01HKAAA000000000000000000R",
                 email="t@b.com",
             )
+    # No friendship row written.
+    assert not repo.friendship_exists(
+        "01HKAAA000000000000000000R", "01HKBBB000000000000000000T"
+    )
 
 
 def test_list_skips_friend_with_missing_meta(

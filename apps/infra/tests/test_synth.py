@@ -1190,11 +1190,13 @@ def test_api_stack_lambda_iam_ddb_actions_enumerated(
         assert action in blob, f"Lambda IAM missing required DDB action {action!r}"
 
     # Forbidden actions — no wildcards, no Scan, no BatchWriteItem,
-    # no TransactWriteItems (canonical-pair Put with cond suffices).
+    # no TransactWriteItems (canonical-pair Put with cond suffices),
+    # no ConditionCheckItem (only useful inside transactions).
     for action in (
         "dynamodb:Scan",
         "dynamodb:BatchWriteItem",
         "dynamodb:TransactWriteItems",
+        "dynamodb:ConditionCheckItem",
         '"dynamodb:*"',  # quoted to avoid matching enumerated actions
     ):
         assert action not in blob, (
