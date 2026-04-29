@@ -126,7 +126,7 @@ def test_ulid_regex_accepts_valid() -> None:
 
 
 def test_base_exception_does_not_break_finally(
-    seed_config: AppConfig,  # noqa: ARG001
+    seed_config: AppConfig,
 ) -> None:
     """Regression: when a ``BaseException`` subclass (e.g. SystemExit)
     skips the ``except Exception`` block, the ``finally`` access-log
