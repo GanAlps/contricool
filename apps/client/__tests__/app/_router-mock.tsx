@@ -19,9 +19,11 @@ export type RouterCall =
 const state: {
   calls: RouterCall[];
   params: Record<string, string | undefined>;
+  pathname: string;
 } = {
   calls: [],
   params: {},
+  pathname: '/',
 };
 
 export function getRouterMock(): typeof state {
@@ -32,9 +34,14 @@ export function setSearchParams(params: Record<string, string | undefined>): voi
   state.params = params;
 }
 
+export function setPathname(pathname: string): void {
+  state.pathname = pathname;
+}
+
 export function resetRouterMock(): void {
   state.calls = [];
   state.params = {};
+  state.pathname = '/';
 }
 
 export function mockExpoRouter(): void {
@@ -53,8 +60,9 @@ export function mockExpoRouter(): void {
       children?: ReactNode;
       testID?: string;
       className?: string;
+      [key: string]: unknown;
     };
-    const Link = ({ href, children, testID, className }: LinkProps) => {
+    const Link = ({ href, children, testID, className, ...rest }: LinkProps) => {
       const target = typeof href === 'string' ? href : JSON.stringify(href);
       return (
         <a
@@ -65,6 +73,7 @@ export function mockExpoRouter(): void {
             e.preventDefault();
             state.calls.push({ kind: 'push', href });
           }}
+          {...(rest as Record<string, string | undefined>)}
         >
           {children}
         </a>
@@ -83,7 +92,7 @@ export function mockExpoRouter(): void {
       useRouter: () => router,
       useLocalSearchParams: () => state.params,
       useSegments: () => [],
-      usePathname: () => '/',
+      usePathname: () => state.pathname,
       useNavigation: () => ({ goBack: () => state.calls.push({ kind: 'back' }) }),
       Link,
       Redirect,

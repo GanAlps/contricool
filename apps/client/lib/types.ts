@@ -10,9 +10,14 @@
  */
 
 import type {
+  AddFriendRequest,
+  AddFriendResponse,
   AuthUser,
   Currency,
   ForgotPasswordResponse,
+  FriendBalanceResponse,
+  FriendItem,
+  ListFriendsResponse,
   RefreshResponse,
   ResendEmailCodeResponse,
   ResetPasswordRequest,
@@ -26,9 +31,14 @@ import type {
 } from '@contricool/client-sdk';
 
 export type {
+  AddFriendRequest,
+  AddFriendResponse,
   AuthUser,
   Currency,
+  FriendBalanceResponse,
+  FriendItem,
   ForgotPasswordResponse,
+  ListFriendsResponse,
   RefreshResponse,
   ResendEmailCodeResponse,
   ResetPasswordRequest,
@@ -46,6 +56,8 @@ export type LoginResponse = SignInResponse;
 export type SignupInput = SignupRequest;
 export type VerifyEmailInput = VerifyEmailRequest;
 export type ResetPasswordInput = ResetPasswordRequest;
+export type AddFriendInput = AddFriendRequest;
+export type FriendBalance = FriendBalanceResponse;
 
 // Phase 2c envelope wrapper still re-exported from lib/api for callers
 // that need the type without importing the SDK.

@@ -4,10 +4,12 @@ The single Expo SDK 52 + React Native + RN-Web codebase that ships
 ContriCool's web build today and (later) iOS/Android via EAS Build with
 no source rewrite.
 
-Phase 2d covers the **auth foundation** — five public screens (login,
+Phase 2d shipped the **auth foundation** — five public screens (login,
 signup, verify-email, forgot-password, reset-password) plus a stub
-authenticated dashboard. Friends, transactions, profile, settings,
-native deploys, and the full SDK come in later phases.
+authenticated dashboard. Phase 3b adds the **friends UX**: a list
+page, a per-friend detail page, an Add-friend modal, and a top-bar
+nav binding Dashboard / Friends. Transactions, profile, settings, and
+native deploys come in later phases.
 
 ## Stack
 
@@ -131,8 +133,16 @@ apps/client/
 │   ├── index.tsx              # redirect to /login or /dashboard
 │   ├── +not-found.tsx
 │   ├── (auth)/                # public auth screens
-│   └── (app)/                 # authenticated stub dashboard
-├── components/ui/             # primitives (Button, Input, Form, …)
+│   └── (app)/                 # authenticated screens
+│       ├── _layout.tsx        # top-bar nav (Dashboard / Friends / Sign out)
+│       ├── dashboard.tsx
+│       └── friends/
+│           ├── index.tsx      # list + Add-friend CTA
+│           └── [userId].tsx   # detail + balance + Remove
+├── components/
+│   ├── ui/                    # primitives (Button, Sheet, NavLink, …)
+│   └── friends/
+│       └── AddFriendSheet.tsx # email-only add-friend modal
 ├── lib/
 │   ├── api.ts                 # fetch wrapper + 401 retry-once
 │   ├── auth-driver.ts         # interface
@@ -140,7 +150,8 @@ apps/client/
 │   ├── auth-store.ts          # Zustand store
 │   ├── id-token.ts            # base64url JWT decode
 │   ├── error-mapping.ts       # ApiError → ScreenError
-│   ├── schemas.ts             # Zod schemas for the 5 forms
+│   ├── queries/friends.ts     # TanStack Query hooks for /friends/*
+│   ├── schemas.ts             # Zod schemas (auth + AddFriendSchema)
 │   └── tokens.ts              # design tokens
 ├── __tests__/                 # mirror src layout
 └── scripts/check-bundle-size.mjs
