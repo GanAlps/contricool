@@ -12,17 +12,19 @@ from app.features.friends.models import (
 )
 
 
-def test_add_friend_request_accepts_valid_email() -> None:
+def test_add_friend_request_accepts_string_input() -> None:
+    """The schema is permissive ``str``; the service distinguishes
+    phone-shaped (400 INVALID_IDENTIFIER) from malformed-email (422
+    VALIDATION_ERROR). See test_add for the integration tests."""
     r = AddFriendRequest(email="alice@example.com")
     assert r.email == "alice@example.com"
+    # Phone-shaped accepted at the model layer — service rejects.
+    r2 = AddFriendRequest(email="+14155552671")
+    assert r2.email == "+14155552671"
 
 
-def test_add_friend_request_rejects_non_email() -> None:
-    """N1: non-email inputs (incl. phone-shaped strings) → 422."""
-    with pytest.raises(ValidationError):
-        AddFriendRequest(email="+14155552671")
-    with pytest.raises(ValidationError):
-        AddFriendRequest(email="not-an-email")
+def test_add_friend_request_rejects_empty_string() -> None:
+    """min_length=1 keeps empty payloads out without rejecting valid emails."""
     with pytest.raises(ValidationError):
         AddFriendRequest(email="")
 

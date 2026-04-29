@@ -228,8 +228,9 @@ class ApiStack(Stack):
         #
         # Phase 3a additions: ``Query`` (friend list — base + GSI1),
         # ``BatchGetItem`` (hydrate friend names/currencies),
-        # ``DeleteItem`` (remove-friend), ``TransactWriteItems``
-        # (canonical-pair insert with attribute_not_exists cond).
+        # ``DeleteItem`` (remove-friend). Canonical-pair friendship
+        # insert uses ``PutItem`` with ``attribute_not_exists(PK)``
+        # — single-item writes don't need TransactWriteItems.
         users_table.grant(
             self.lambda_function,
             "dynamodb:GetItem",
@@ -238,15 +239,6 @@ class ApiStack(Stack):
             "dynamodb:Query",
             "dynamodb:BatchGetItem",
             "dynamodb:DeleteItem",
-            "dynamodb:ConditionCheckItem",
-        )
-        # TransactWriteItems is granted on the table; the canonical-pair
-        # write uses the implicit Put inside the transaction.
-        self.lambda_function.add_to_role_policy(
-            iam.PolicyStatement(
-                actions=["dynamodb:TransactWriteItems"],
-                resources=[users_table.table_arn],
-            )
         )
 
         # X-Ray sampling rate is documented; concrete sampling rule lives in

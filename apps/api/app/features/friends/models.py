@@ -10,7 +10,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 Currency = Literal["USD", "INR"]
 
@@ -18,14 +18,19 @@ Currency = Literal["USD", "INR"]
 class AddFriendRequest(BaseModel):
     """Payload for ``POST /v1/friends/add``.
 
-    ``email`` is the only identifier accepted at MVP per CONSTRAINTS.md
-    "Friend search/add is by email only at MVP". Phone is unverified-
-    metadata-only on Cognito and is never used for lookup.
+    ``email`` is permissive ``str`` here so the service layer can
+    distinguish between a phone-shaped identifier (→ 400
+    ``INVALID_IDENTIFIER`` per CLAUDE.md red-line 3) and a malformed
+    email (→ 422 ``VALIDATION_ERROR``). Strict ``EmailStr`` would
+    collapse both into 422, losing the distinction.
+
+    Phone is unverified-metadata-only on Cognito and is never used
+    for lookup (CONSTRAINTS.md "email-only at MVP").
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    email: EmailStr
+    email: Annotated[str, Field(min_length=1, max_length=320)]
 
 
 class FriendItem(BaseModel):

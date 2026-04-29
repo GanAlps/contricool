@@ -63,7 +63,9 @@ def test_add_friend_n1_phone_shaped_rejected(
     friends_env: dict[str, object],
     authed_headers: dict[str, str],
 ) -> None:
-    """N1: phone-shaped identifier → 422 (Pydantic EmailStr rejects)."""
+    """N1: E.164 phone-shaped identifier → 400 INVALID_IDENTIFIER
+    (CLAUDE.md red-line 3 — distinct from malformed-email 422 so the
+    client can render a precise "email only" message)."""
     seed_user(
         friends_env, user_id=REQUESTER_ID, email="r@example.com", name="R"
     )
@@ -72,8 +74,26 @@ def test_add_friend_n1_phone_shaped_rejected(
         json={"email": "+14155552671"},
         headers=authed_headers,
     )
-    assert r.status_code == 422
-    assert r.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "INVALID_IDENTIFIER"
+
+
+def test_add_friend_n1_digits_only_rejected_with_invalid_identifier(
+    friends_client: TestClient,
+    friends_env: dict[str, object],
+    authed_headers: dict[str, str],
+) -> None:
+    """N1 (cont): digits/spaces/dashes only → 400 INVALID_IDENTIFIER."""
+    seed_user(
+        friends_env, user_id=REQUESTER_ID, email="r@example.com", name="R"
+    )
+    r = friends_client.post(
+        "/v1/friends/add",
+        json={"email": "415-555-2671"},
+        headers=authed_headers,
+    )
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "INVALID_IDENTIFIER"
 
 
 def test_add_friend_n2_malformed_email(
@@ -81,6 +101,7 @@ def test_add_friend_n2_malformed_email(
     friends_env: dict[str, object],
     authed_headers: dict[str, str],
 ) -> None:
+    """N2: malformed (but non-phone-shaped) email → 422 VALIDATION_ERROR."""
     seed_user(
         friends_env, user_id=REQUESTER_ID, email="r@example.com", name="R"
     )
@@ -90,6 +111,7 @@ def test_add_friend_n2_malformed_email(
         headers=authed_headers,
     )
     assert r.status_code == 422
+    assert r.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
 def test_add_friend_n3_empty_body(

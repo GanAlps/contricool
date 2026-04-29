@@ -113,33 +113,66 @@ def get_user_meta(user_id: str) -> UserMeta | None:
     )
 
 
+_BATCH_GET_MAX_RETRIES = 3
+
+
 def batch_get_user_metas(user_ids: list[str]) -> dict[str, UserMeta]:
     """Hydrate a batch of friend ids with their (name, currency).
 
     DDB ``BatchGetItem`` caps at 100 keys per call; ``GET /v1/friends``
-    caps ``limit`` at 100 too, so a single call always covers a page.
+    caps ``limit`` at 100 too, so a single call always covers a page
+    in steady-state.
+
+    DDB can return ``UnprocessedKeys`` under throttle even when below
+    the request size cap. We retry up to ``_BATCH_GET_MAX_RETRIES``
+    times on the residual keys; if any keys remain unprocessed after
+    that, raise a ``ClientError`` rather than silently dropping
+    friends from the page.
     """
     if not user_ids:
         return {}
     cfg = config.load()
-    keys = [{"PK": f"USER#{uid}", "SK": "META"} for uid in user_ids]
+    table_name = cfg.users_table_name
+    pending = [{"PK": f"USER#{uid}", "SK": "META"} for uid in user_ids]
     client = boto3.resource("dynamodb", region_name=cfg.aws_region)
-    response = client.batch_get_item(
-        RequestItems={
-            cfg.users_table_name: {
-                "Keys": keys,
-                "ProjectionExpression": "PK, display_name, currency",
-            }
-        }
-    )
-    items = response.get("Responses", {}).get(cfg.users_table_name, [])
+
     out: dict[str, UserMeta] = {}
-    for item in items:
-        uid = str(item["PK"]).removeprefix("USER#")
-        out[uid] = UserMeta(
-            user_id=uid,
-            name=str(item["display_name"]),
-            currency=str(item["currency"]),
+    attempts_left = _BATCH_GET_MAX_RETRIES + 1
+    while pending and attempts_left > 0:
+        attempts_left -= 1
+        response = client.batch_get_item(
+            RequestItems={
+                table_name: {
+                    "Keys": pending,
+                    "ProjectionExpression": "PK, display_name, currency",
+                }
+            }
+        )
+        for item in response.get("Responses", {}).get(table_name, []):
+            uid = str(item["PK"]).removeprefix("USER#")
+            out[uid] = UserMeta(
+                user_id=uid,
+                name=str(item["display_name"]),
+                currency=str(item["currency"]),
+            )
+        unprocessed = (
+            response.get("UnprocessedKeys", {})
+            .get(table_name, {})
+            .get("Keys", [])
+        )
+        pending = list(unprocessed)
+    if pending:
+        raise ClientError(
+            {
+                "Error": {
+                    "Code": "ProvisionedThroughputExceededException",
+                    "Message": (
+                        "BatchGetItem returned unprocessed keys after "
+                        f"{_BATCH_GET_MAX_RETRIES + 1} attempts; aborting."
+                    ),
+                }
+            },
+            "BatchGetItem",
         )
     return out
 

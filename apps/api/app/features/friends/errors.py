@@ -10,6 +10,20 @@ from __future__ import annotations
 from app.features.auth.errors import AuthError
 
 
+class InvalidIdentifierError(AuthError):
+    """Friend-add called with a non-email identifier (CONSTRAINTS.md
+    "email-only at MVP" — phone-shaped strings are rejected upfront
+    with a distinct 400 code so the client renders a precise
+    "email only" message rather than a generic validation error)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code="INVALID_IDENTIFIER",
+            http_status=400,
+            message="Friends are added by email only.",
+        )
+
+
 class UserNotFoundError(AuthError):
     """No matching user / no matching friendship.
 

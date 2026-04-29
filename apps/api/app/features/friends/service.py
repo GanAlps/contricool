@@ -6,7 +6,10 @@ service to HTTP shapes.
 """
 from __future__ import annotations
 
+import re
 from decimal import Decimal
+
+from email_validator import EmailNotValidError, validate_email
 
 from app.core.observability import logger
 from app.features.friends import repository as repo
@@ -22,10 +25,12 @@ from app.features.friends.cursor import (
 from app.features.friends.errors import (
     ConflictError,
     InvalidCursorError,
+    InvalidIdentifierError,
     RateLimitedError,
     SelfActionForbiddenError,
     SelfAddForbiddenError,
     UserNotFoundError,
+    ValidationFailedError,
 )
 from app.features.friends.models import (
     AddFriendResponse,
@@ -39,22 +44,54 @@ from app.features.friends.rate_limit import (
 )
 
 
+# Phone-shaped: starts with `+` followed by digits (E.164), OR is 7+
+# chars of only digits / hyphens / spaces. False-positives are fine —
+# the client should never legitimately send anything resembling a
+# phone here. Used to distinguish 400 ``INVALID_IDENTIFIER`` from
+# 422 ``VALIDATION_ERROR``.
+_PHONE_LIKE = re.compile(r"^\s*(\+[\d\-\s]+|[\d\-\s]{7,})\s*$")
+
+
+def _normalise_email(raw: str) -> str:
+    """Validate + normalise the email; raise the right error class."""
+    candidate = raw.strip()
+    if _PHONE_LIKE.fullmatch(candidate):
+        raise InvalidIdentifierError()
+    try:
+        result = validate_email(candidate, check_deliverability=False)
+    except EmailNotValidError as exc:
+        raise ValidationFailedError(field="email", issue=str(exc)) from exc
+    return result.normalized.lower()
+
+
 def add_friend(*, requester_id: str, email: str) -> AddFriendResponse:
     """Add a friend by email.
 
     Order is load-bearing for the privacy story:
-    1. Rate-limit FIRST (closes email-existence enumeration oracle).
-    2. Lookup target by email-hash GSI1.
-    3. Self-add guard.
-    4. TransactWriteItems with `attribute_not_exists(PK)` cond.
-    5. Read target META for the response.
+    1. Identifier check (phone-shape → 400, malformed email → 422)
+       runs BEFORE the rate-limit. We don't want every malformed
+       request to consume bucket quota, but we also don't want
+       phone-vs-email distinction to be observable through quota.
+    2. Rate-limit (closes email-existence enumeration oracle for
+       valid-email shapes).
+    3. Lookup target by email-hash GSI1.
+    4. Self-add guard.
+    5. Read target META.
+    6. Bilateral PutItem with attribute_not_exists cond.
+
+    The order of (5) before (6) prevents an orphaned friendship row:
+    if the META is missing post-create, we've already written a row
+    that no list query can resolve a name for, blocking re-adds with
+    409 forever.
     """
+    normalised_email = _normalise_email(email)
+
     try:
         consume_friend_add(requester_id)
     except FriendAddRateLimitExceeded as exc:
         raise RateLimitedError(retry_after_seconds=exc.retry_after_seconds) from exc
 
-    target_id = repo.find_user_by_email(email)
+    target_id = repo.find_user_by_email(normalised_email)
     if target_id is None:
         logger.info(
             "friend_add_user_not_found",
@@ -69,6 +106,17 @@ def add_friend(*, requester_id: str, email: str) -> AddFriendResponse:
         )
         raise SelfAddForbiddenError()
 
+    target_meta = repo.get_user_meta(target_id)
+    if target_meta is None:
+        # Defensive: GSI1 hit but META vanished. Treat as not-found
+        # rather than write a row we can't render. Same masking as
+        # the explicit not-found branch above.
+        logger.error(
+            "friend_add_meta_missing",
+            extra={"requester_id": requester_id, "friend_id": target_id},
+        )
+        raise UserNotFoundError()
+
     try:
         created_at = repo.create_friendship(
             requester_id, target_id, created_by=requester_id
@@ -80,25 +128,14 @@ def add_friend(*, requester_id: str, email: str) -> AddFriendResponse:
         )
         raise ConflictError() from exc
 
-    meta = repo.get_user_meta(target_id)
-    if meta is None:
-        # Defensive: GSI1 lookup hit but the META row vanished mid-request.
-        # Log and return a 500 by surfacing as ``UserNotFoundError`` —
-        # we'd rather report "no such user" than a fictional success.
-        logger.error(
-            "friend_add_meta_missing_post_create",
-            extra={"requester_id": requester_id, "friend_id": target_id},
-        )
-        raise UserNotFoundError()
-
     logger.info(
         "friend_added",
         extra={"requester_id": requester_id, "friend_id": target_id},
     )
     return AddFriendResponse(
         user_id=target_id,
-        name=meta.name,
-        currency=meta.currency,  # type: ignore[arg-type]
+        name=target_meta.name,
+        currency=target_meta.currency,  # type: ignore[arg-type]
         since=created_at,
     )
 
