@@ -170,6 +170,13 @@ class ApiStack(Stack):
             },
             log_group=log_group,
             tracing=lambda_.Tracing.ACTIVE,
+            # ``current_version`` (used below for the ``live`` alias) inherits
+            # these options. ``RETAIN`` keeps prior published versions around
+            # so the deploy workflow's alias-shift rollback can re-point
+            # ``live`` at the previous version.
+            current_version_options=lambda_.VersionOptions(
+                removal_policy=RemovalPolicy.RETAIN,
+            ),
         )
 
         # IAM grants for Phase 2b cold-start config loading. The Lambda
@@ -241,17 +248,18 @@ class ApiStack(Stack):
 
         # Published version + ``live`` alias. Required for SnapStart and for
         # the deploy workflow's blue/green-style alias-shift rollback story.
-        version = lambda_.Version(
-            self,
-            "ApiFunctionVersion",
-            lambda_=self.lambda_function,
-            removal_policy=RemovalPolicy.RETAIN,
-        )
+        #
+        # ``current_version`` returns a ``Version`` whose CDK logical ID is
+        # suffixed with the function's CodeSha256 hash, so a new container
+        # image produces a new logical ID, CFN treats it as a new resource,
+        # and a fresh immutable version is published — which the alias then
+        # tracks. Using a static-ID ``lambda_.Version(...)`` would freeze
+        # the alias at whatever code shipped on the very first deploy.
         self.lambda_alias = lambda_.Alias(
             self,
             "ApiFunctionLiveAlias",
             alias_name="live",
-            version=version,
+            version=self.lambda_function.current_version,
         )
 
         # API Gateway HTTP API.
