@@ -79,12 +79,14 @@ class ApiStack(Stack):
         xray_sampling_rate: float,
         reserved_concurrent_executions: int = 100,
         prod_cmk: kms.IKey | None = None,
+        app_version: str = "0.0.1-dev",
         **kwargs: Any,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         self._env_name = env_name
         is_prod = env_name == "prod"
+        self._app_version = app_version
 
         # Explicit LogGroup so we can set retention without using the
         # deprecated `log_retention` Function param.
@@ -114,6 +116,7 @@ class ApiStack(Stack):
                 "POWERTOOLS_SERVICE_NAME": "contricool-api",
                 "POWERTOOLS_LOG_LEVEL": "INFO",
                 "ENV_NAME": env_name,
+                "APP_VERSION": app_version,
                 "AWS_LAMBDA_EXEC_WRAPPER": "/opt/extensions/lambda-adapter",
             },
             log_group=log_group,
@@ -122,22 +125,25 @@ class ApiStack(Stack):
 
         # IAM grants for Phase 2b cold-start config loading. The Lambda
         # reads /contricool/<env>/{cognito,ddb}/* and the
-        # /contricool/<env>/pii-salt SecureString from SSM at init —
-        # GetParameters covers the batch read; KMS Decrypt is needed in
-        # prod where the salt is encrypted with the project CMK (dev uses
-        # the AWS-managed alias/aws/ssm so no CMK grant is needed).
+        # /contricool/<env>/pii-salt SecureString from SSM at init via a
+        # single ``ssm:GetParameters`` (plural batch) call. KMS Decrypt is
+        # needed in prod where the salt is encrypted with the project CMK
+        # (dev uses the AWS-managed alias/aws/ssm so no CMK grant
+        # required).
         self.lambda_function.add_to_role_policy(
             iam.PolicyStatement(
-                actions=["ssm:GetParameters", "ssm:GetParameter"],
+                actions=["ssm:GetParameters"],
                 resources=[
                     f"arn:aws:ssm:{self.region}:{self.account}:parameter/contricool/{env_name}/*",
                 ],
             )
         )
         if is_prod:
-            assert prod_cmk is not None, (
-                "prod ApiStack requires the project CMK to decrypt the PII salt"
-            )
+            if prod_cmk is None:
+                raise ValueError(
+                    "prod ApiStack requires the project CMK to decrypt "
+                    "the PII salt SecureString. Pass prod_cmk via app.py."
+                )
             prod_cmk.grant_decrypt(self.lambda_function)
 
         # X-Ray sampling rate is documented; concrete sampling rule lives in

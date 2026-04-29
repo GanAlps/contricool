@@ -52,12 +52,21 @@ class CoreMiddleware(BaseHTTPMiddleware):
         try:
             response = await call_next(request)
             status_code = response.status_code
-        except BaseException:
+        except Exception:
             # Surface the failure as a 5xx access-log line before the
-            # exception bubbles out; the exception message itself is
-            # routed via Powertools' default handler (with redaction).
+            # exception bubbles out. We deliberately do NOT log the
+            # exception traceback here — Python tracebacks include local
+            # variables, which may hold PII (e.g., a user email captured
+            # in a route handler). FastAPI's exception handler logs the
+            # exception type/message via the redacting formatter; that's
+            # sufficient for triage. Only catch ``Exception`` (not
+            # ``BaseException``) so KeyboardInterrupt / SystemExit still
+            # propagate cleanly during local dev.
             status_code = 500
-            logger.exception("request failed")
+            logger.error(
+                "request failed",
+                extra={"status_code": 500},
+            )
             raise
         finally:
             duration_ms = round(

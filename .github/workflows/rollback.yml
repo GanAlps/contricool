@@ -89,6 +89,11 @@ jobs:
           CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
           CDK_DEFAULT_REGION: ${{ vars.AWS_REGION }}
           CONTRICOOL_ALERTS_EMAIL: ${{ vars.CONTRICOOL_ALERTS_EMAIL }}
+          # Inputs.tag is the release/<date>-<sha7> the workflow_dispatch
+          # operator picked; embed it in the Lambda's APP_VERSION so a
+          # rolled-back ``/v1/health`` reports the rollback target rather
+          # than the failed deploy's sha.
+          CONTRICOOL_APP_VERSION: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           cdk deploy 'Contricool-Prod-*' \

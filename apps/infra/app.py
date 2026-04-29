@@ -48,6 +48,9 @@ ACCOUNT = os.environ.get("CDK_DEFAULT_ACCOUNT")
 REGION = os.environ.get("CDK_DEFAULT_REGION", "us-west-2")
 ALERTS_EMAIL = os.environ.get("CONTRICOOL_ALERTS_EMAIL")
 GITHUB_REPO = os.environ.get("CONTRICOOL_GITHUB_REPO", "GanAlps/contricool")
+# Surfaces in the Lambda's APP_VERSION env var and ``/v1/health`` response.
+# deploy.yml exports ${{ github.sha }}; local synth defaults to "dev".
+APP_VERSION = os.environ.get("CONTRICOOL_APP_VERSION", "dev")
 
 if not ACCOUNT:
     raise RuntimeError(
@@ -149,6 +152,7 @@ for env_name, cfg in ENV_CONFIGS.items():
         xray_sampling_rate=cfg["xray_sampling_rate"],
         reserved_concurrent_executions=cfg["api_reserved_concurrency"],
         prod_cmk=shared.prod_cmk if is_prod else None,
+        app_version=APP_VERSION,
     )
     api.add_dependency(shared)
 

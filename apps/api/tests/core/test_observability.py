@@ -11,7 +11,9 @@ import json
 import pytest
 
 from app.core.observability import (
+    DENY_COMPOUND_KEYS,
     DENY_KEYS,
+    RedactingFormatter,
     _is_sensitive_key,
     redact,
     redact_json,
@@ -49,6 +51,17 @@ from app.core.observability import (
                                     # exact fragments, not stems
         ("otp_code", True),         # ``otp`` matches; verification codes
                                     # MUST be logged under this key
+        # Compound keys: ``credit`` and ``card`` are individually fine
+        # (``discount_card``, ``credit_score``), but the combo is a
+        # credit-card number and must redact via DENY_COMPOUND_KEYS.
+        ("credit_card", True),
+        ("credit-card", True),
+        ("creditCard", True),
+        ("card_number", True),
+        ("cc_number", True),
+        ("ccn", True),
+        ("credit_score", False),    # 'credit' alone is fine
+        ("discount_card", False),   # 'card' alone is fine
     ],
 )
 def test_is_sensitive_key(key: str, expected: bool) -> None:
@@ -140,3 +153,62 @@ def test_deny_keys_contains_critical_pii_terms() -> None:
     assert must_have.issubset(DENY_KEYS), (
         f"DENY_KEYS missing critical terms: {must_have - DENY_KEYS}"
     )
+
+
+def test_deny_compound_keys_contains_payment_terms() -> None:
+    """Spec R2 mandates ``credit_card`` redaction. Sanity check the
+    compound set so a future cleanup can't quietly drop it."""
+    must_have = {"credit_card", "card_number", "ccn"}
+    assert must_have.issubset(DENY_COMPOUND_KEYS), (
+        f"DENY_COMPOUND_KEYS missing payment terms: "
+        f"{must_have - DENY_COMPOUND_KEYS}"
+    )
+
+
+def test_redacting_formatter_redacts_logger_extras() -> None:
+    """Defence-in-depth: even if a feature handler forgets to wrap its
+    extras in ``redact()`` manually, the project-wide formatter does it
+    on every emit. Without this hook, a single ``logger.info("X",
+    extra={"email": val})`` call would leak PII verbatim."""
+    import logging
+
+    from aws_lambda_powertools import Logger
+
+    formatter = RedactingFormatter()
+    record = logging.LogRecord(
+        name="contricool-api",
+        level=logging.INFO,
+        pathname="x.py",
+        lineno=1,
+        msg="testmsg",
+        args=(),
+        exc_info=None,
+    )
+    record.email = "alice@example.com"
+    record.password = "hunter2"
+    record.credit_card = "4111-1111-1111-1111"
+    record.user_id = "01HK3W7QF6VMYG8XR3DQ7B5N6P"
+    formatted = formatter.format(record)
+
+    parsed = json.loads(formatted)
+    # Sensitive fields must arrive as the redaction sentinel.
+    assert parsed.get("email") == "[REDACTED]"
+    assert parsed.get("password") == "[REDACTED]"
+    assert parsed.get("credit_card") == "[REDACTED]"
+    # Non-sensitive fields pass through.
+    assert parsed.get("user_id") == "01HK3W7QF6VMYG8XR3DQ7B5N6P"
+    # And the raw values must NOT appear anywhere in the serialised line.
+    assert "alice@example.com" not in formatted
+    assert "hunter2" not in formatted
+    assert "4111-1111-1111-1111" not in formatted
+
+    # Confirm the project Logger uses this formatter (not just our test
+    # instance — the real one).
+    from app.core.observability import logger
+
+    assert isinstance(logger, Logger)
+    # The handler attached by Powertools carries the formatter.
+    handlers = logger.handlers
+    assert any(
+        isinstance(h.formatter, RedactingFormatter) for h in handlers
+    ), "Project Logger must be configured with RedactingFormatter"

@@ -89,3 +89,41 @@ def test_from_claims_invalid_groups_type_raises() -> None:
     claims = {**_VALID_CLAIMS, "cognito:groups": 42}
     with pytest.raises(ValueError):
         Principal.from_claims(claims)
+
+
+def test_from_claims_missing_email_raises() -> None:
+    claims = {k: v for k, v in _VALID_CLAIMS.items() if k != "email"}
+    with pytest.raises(ValueError, match="email"):
+        Principal.from_claims(claims)
+
+
+def test_from_claims_missing_name_raises() -> None:
+    claims = {k: v for k, v in _VALID_CLAIMS.items() if k != "name"}
+    with pytest.raises(ValueError, match="name"):
+        Principal.from_claims(claims)
+
+
+def test_from_claims_missing_token_use_raises() -> None:
+    claims = {k: v for k, v in _VALID_CLAIMS.items() if k != "token_use"}
+    with pytest.raises(ValueError, match="token_use"):
+        Principal.from_claims(claims)
+
+
+def test_from_claims_user_id_too_long_raises() -> None:
+    claims = {**_VALID_CLAIMS, "custom:user_id": "0" * 27}
+    with pytest.raises(ValueError):
+        Principal.from_claims(claims)
+
+
+def test_from_claims_empty_display_name_raises() -> None:
+    claims = {**_VALID_CLAIMS, "name": ""}
+    with pytest.raises(ValueError):
+        Principal.from_claims(claims)
+
+
+def test_from_claims_whitespace_only_display_name_raises_after_strip() -> None:
+    """``name`` is stripped before validation; whitespace-only collapses
+    to empty and must reject."""
+    claims = {**_VALID_CLAIMS, "name": "   "}
+    with pytest.raises(ValueError):
+        Principal.from_claims(claims)
