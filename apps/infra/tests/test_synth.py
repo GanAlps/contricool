@@ -163,6 +163,85 @@ def test_dev_deploy_role_cannot_write_shared_stack(cdk_env: cdk.Environment) -> 
                 )
 
 
+def test_deploy_roles_explicitly_deny_writes_to_pii_salt(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Deploy roles need ``ssm:PutParameter`` on the wildcard
+    ``/contricool/*`` path so deploy.yml can publish CloudFront domains,
+    Cognito IDs, and table names. An explicit Deny on
+    ``/contricool/*/pii-salt`` ensures the pii-salt SSM SecureString stays
+    owned exclusively by the AuthStack custom resource — rotation breaks
+    every email lookup row, so the IAM layer enforces the no-rotation rule
+    that ``test_deploy_yaml_writes_cognito_and_ddb_ids_to_ssm`` only
+    enforces in the workflow text."""
+    import json
+
+    app = cdk.App()
+    stack = SharedStack(
+        app,
+        "Contricool-Shared",
+        env=cdk_env,
+        github_repo="GanAlps/contricool",
+        alerts_email="ops@example.invalid",
+    )
+    template = assertions.Template.from_stack(stack)
+    roles = template.find_resources("AWS::IAM::Role")
+    deploy_role_ids = [
+        logical_id
+        for logical_id, props in roles.items()
+        if props["Properties"].get("RoleName")
+        in ("Contricool-CI-Dev-Deploy", "Contricool-CI-Prod-Deploy")
+    ]
+    assert len(deploy_role_ids) == 2, "Expected dev + prod deploy roles"
+
+    policies = template.find_resources("AWS::IAM::Policy")
+    for role_id in deploy_role_ids:
+        # Find the inline policy attached to this role.
+        attached = [
+            props
+            for props in policies.values()
+            if any(
+                isinstance(r, dict) and r.get("Ref") == role_id
+                for r in props["Properties"].get("Roles", [])
+            )
+        ]
+        assert attached, f"No inline policy attached to {role_id}"
+
+        # Aggregate every statement across attached policies.
+        deny_statements: list[dict[str, object]] = []
+        for props in attached:
+            for stmt in props["Properties"]["PolicyDocument"]["Statement"]:
+                if stmt.get("Effect") == "Deny":
+                    deny_statements.append(stmt)
+
+        # Some statement must Deny PutParameter on the pii-salt path.
+        salt_denies = [
+            s
+            for s in deny_statements
+            if "ssm:PutParameter" in (
+                s["Action"] if isinstance(s["Action"], list) else [s["Action"]]
+            )
+            and "pii-salt" in json.dumps(s.get("Resource", ""))
+        ]
+        assert salt_denies, (
+            f"Role {role_id}: no Deny on ssm:PutParameter for "
+            "/contricool/*/pii-salt. Without this, the wildcard "
+            "PutParameter Allow on /contricool/* could overwrite the salt."
+        )
+        # And DeleteParameter, for symmetry.
+        salt_delete_denies = [
+            s
+            for s in deny_statements
+            if "ssm:DeleteParameter" in (
+                s["Action"] if isinstance(s["Action"], list) else [s["Action"]]
+            )
+            and "pii-salt" in json.dumps(s.get("Resource", ""))
+        ]
+        assert salt_delete_denies, (
+            f"Role {role_id}: no Deny on ssm:DeleteParameter for the salt path."
+        )
+
+
 def test_deploy_role_trust_patterns_match_workflow_environment_keys(
     cdk_env: cdk.Environment,
 ) -> None:
@@ -523,6 +602,38 @@ def test_auth_stack_three_clients_no_secret_with_srp_only(
         }
         assert not (flows & forbidden), (
             f"Client {props['ClientName']} has forbidden flows: {flows & forbidden!r}"
+        )
+
+
+def test_auth_stack_clients_have_no_oauth_flows(
+    cdk_env: cdk.Environment,
+) -> None:
+    """``AllowedOAuthFlows`` must be empty on every client. CDK's default
+    when ``o_auth=`` is omitted is to enable ``code`` + ``implicit`` with
+    a placeholder callback URL — not what we want at MVP (federation
+    deferred). Asserting here catches the regression where someone
+    deletes the explicit ``OAuthSettings`` block."""
+    template = _auth_stack("dev", cdk_env)
+    clients = template.find_resources("AWS::Cognito::UserPoolClient")
+    for c in clients.values():
+        props = c["Properties"]
+        flows = props.get("AllowedOAuthFlows") or []
+        assert not flows, (
+            f"Client {props['ClientName']} has OAuth flows enabled: {flows!r}; "
+            "MVP requires AllowedOAuthFlows be empty."
+        )
+        # AllowedOAuthFlowsUserPoolClient must be False/missing — when True it
+        # opts the client into the OAuth flows above.
+        assert props.get("AllowedOAuthFlowsUserPoolClient") in (False, None)
+        # Callback / logout URLs must be absent — they have no purpose without
+        # OAuth flows.
+        assert not props.get("CallbackURLs"), (
+            f"Client {props['ClientName']} has CallbackURLs set; "
+            "remove with OAuth flows."
+        )
+        assert not props.get("LogoutURLs"), (
+            f"Client {props['ClientName']} has LogoutURLs set; "
+            "remove with OAuth flows."
         )
 
 

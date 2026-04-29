@@ -114,18 +114,15 @@ class AuthStack(Stack):
                 access_token_validity=Duration.hours(1),
                 id_token_validity=Duration.hours(1),
                 refresh_token_validity=Duration.days(30),
-                # No OAuth flows — federation deferred. Disabling explicitly
-                # so we don't accidentally pick up CDK defaults.
-                o_auth=cognito.OAuthSettings(
-                    flows=cognito.OAuthFlows(
-                        authorization_code_grant=False,
-                        implicit_code_grant=False,
-                        client_credentials=False,
-                    ),
-                    scopes=[],
-                    callback_urls=[],
-                    logout_urls=[],
-                ),
+                # No OAuth flows — federation deferred. ``disable_o_auth``
+                # is what CDK exposes for "do not enable OAuth at all";
+                # passing an empty ``OAuthSettings`` would still register
+                # the client as OAuth-enabled (CDK sets
+                # ``AllowedOAuthFlowsUserPoolClient=True`` on any non-None
+                # ``o_auth=``), which is the regression
+                # ``test_auth_stack_clients_have_no_oauth_flows`` guards
+                # against.
+                disable_o_auth=True,
                 supported_identity_providers=[
                     cognito.UserPoolClientIdentityProvider.COGNITO,
                 ],

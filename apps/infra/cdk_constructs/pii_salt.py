@@ -85,9 +85,13 @@ class PiiSalt(Construct):
             )
         )
         if kms_key_arn:
+            # Write-only path: PutParameter on a SecureString needs Encrypt
+            # + GenerateDataKey to wrap the value. The handler never reads
+            # the salt back, so kms:Decrypt would be unused surface — Phase
+            # 2c's API Lambda gets its own narrowly-scoped Decrypt grant.
             provider_function.add_to_role_policy(
                 iam.PolicyStatement(
-                    actions=["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey"],
+                    actions=["kms:Encrypt", "kms:GenerateDataKey"],
                     resources=[kms_key_arn],
                 )
             )

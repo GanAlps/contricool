@@ -110,9 +110,18 @@ class DataStack(Stack):
             description="Users table ARN (consumed by API Lambda IAM policy).",
         )
         if is_prod:
+            # Streams are explicitly enabled for prod above; missing ARN here
+            # would mean CDK silently dropped the StreamSpecification —
+            # surface that as a synth failure rather than emitting an empty
+            # CfnOutput.
+            stream_arn = self.users_table.table_stream_arn
+            assert stream_arn is not None, (
+                "Prod Users table has Streams enabled but table_stream_arn "
+                "is None — CDK lost the StreamSpecification."
+            )
             cdk.CfnOutput(
                 self,
                 "UsersTableStreamArn",
-                value=self.users_table.table_stream_arn or "",
+                value=stream_arn,
                 description="Users DDB Stream ARN — no consumer at MVP.",
             )
