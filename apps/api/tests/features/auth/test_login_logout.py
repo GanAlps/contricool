@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from app.core import dependencies as deps
 from app.features.auth import cognito_client
 from tests._jwt_helpers import (
+    base_access_claims,
     base_id_claims,
     build_verifier,
     mint_token,
@@ -223,28 +224,75 @@ def test_logout_tampered_token_401(
 def test_logout_happy_via_mock(
     auth_client: TestClient, auth_env: dict[str, object]
 ) -> None:
-    """Logout: forge a Cognito-shaped JWT signed by the test key, install
-    a verifier that resolves to the test public key, then mock
-    GlobalSignOut so it doesn't bark at the synthetic access token."""
+    """Logout: ``Authorization`` carries the id token (principal),
+    ``X-Cognito-Access-Token`` carries the access token (GlobalSignOut).
+    GlobalSignOut is mocked so a synthetic test access token doesn't
+    trip moto's NotAuthorizedException."""
     deps.set_verifier_for_tests(build_verifier())
-    # Build a MagicMock that delegates non-stubbed methods to the moto
-    # client but explicitly stubs global_sign_out so a synthetic test
-    # access token doesn't trip moto's NotAuthorizedException.
     fake = MagicMock()
     fake.global_sign_out.return_value = None
     cognito_client._set_client_for_tests(fake)
     try:
-        token = mint_token(base_id_claims())
+        id_token = mint_token(base_id_claims())
+        access_token_value = "raw-access-token-from-cognito"
         r = auth_client.post(
-            "/v1/auth/logout", headers={"Authorization": f"Bearer {token}"}
+            "/v1/auth/logout",
+            headers={
+                "Authorization": f"Bearer {id_token}",
+                "X-Cognito-Access-Token": access_token_value,
+            },
         )
         assert r.status_code == 204
         # Cookie cleared.
         assert "rt=" in r.headers.get("set-cookie", "")
-        fake.global_sign_out.assert_called_once()
+        # Service forwarded the *access* token (from the new header), not
+        # the id token, to GlobalSignOut.
+        fake.global_sign_out.assert_called_once_with(AccessToken=access_token_value)
     finally:
         deps.set_verifier_for_tests(None)
         cognito_client._set_client_for_tests(cast(object, auth_env["cognito"]))  # type: ignore[arg-type]
+
+
+def test_logout_missing_access_token_header_400(
+    auth_client: TestClient, auth_env: dict[str, object]
+) -> None:
+    """A valid id token but no ``X-Cognito-Access-Token`` is a malformed
+    request, not an auth failure: principal is established, but we
+    can't issue ``GlobalSignOut``. 400 with ``MISSING_ACCESS_TOKEN``."""
+    deps.set_verifier_for_tests(build_verifier())
+    try:
+        id_token = mint_token(base_id_claims())
+        r = auth_client.post(
+            "/v1/auth/logout", headers={"Authorization": f"Bearer {id_token}"}
+        )
+        assert r.status_code == 400
+        assert r.json()["error"]["code"] == "MISSING_ACCESS_TOKEN"
+        # Refresh cookie still cleared so a partial logout doesn't
+        # leave a dangling session.
+        assert "rt=" in r.headers.get("set-cookie", "")
+    finally:
+        deps.set_verifier_for_tests(None)
+
+
+def test_logout_access_token_in_authorization_rejected(
+    auth_client: TestClient, auth_env: dict[str, object]
+) -> None:
+    """``Authorization`` must carry the id token; an access token in
+    that header is 401 ``UNAUTHENTICATED``."""
+    deps.set_verifier_for_tests(build_verifier())
+    try:
+        access_token_jwt = mint_token(base_access_claims())
+        r = auth_client.post(
+            "/v1/auth/logout",
+            headers={
+                "Authorization": f"Bearer {access_token_jwt}",
+                "X-Cognito-Access-Token": "raw-access-token-from-cognito",
+            },
+        )
+        assert r.status_code == 401
+        assert r.json()["error"]["code"] == "UNAUTHENTICATED"
+    finally:
+        deps.set_verifier_for_tests(None)
 
 
 def test_logout_token_from_different_pool_401(
@@ -257,7 +305,11 @@ def test_logout_token_from_different_pool_401(
             base_id_claims(iss="https://cognito-idp.us-west-2.amazonaws.com/us-west-2_OTHER")
         )
         r = auth_client.post(
-            "/v1/auth/logout", headers={"Authorization": f"Bearer {token}"}
+            "/v1/auth/logout",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Cognito-Access-Token": "raw-access-token",
+            },
         )
         assert r.status_code == 401
     finally:

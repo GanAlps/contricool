@@ -84,6 +84,16 @@ async def current_principal(request: Request) -> Principal:
     except InvalidTokenError as exc:
         raise UnauthenticatedError("token verification failed") from exc
 
+    # Authorization carries the **id token** for ContriCool. Real Cognito
+    # access tokens omit ``email``, ``name``, and ``custom:user_id`` —
+    # ``Principal.from_claims`` cannot be built from them. The two
+    # endpoints that *do* need the access token (``/v1/auth/logout`` for
+    # ``GlobalSignOut``) read it from ``X-Cognito-Access-Token``. Reject
+    # access tokens here explicitly so the 401 reason is precise rather
+    # than a downstream "missing claim" surprise.
+    if claims.get("token_use") != "id":
+        raise UnauthenticatedError("Authorization must carry an id token")
+
     try:
         return Principal.from_claims(claims)
     except ValueError as exc:

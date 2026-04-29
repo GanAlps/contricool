@@ -13,9 +13,38 @@ Pool (Phase 2a) + the Users DynamoDB table (Phase 2a) + the shared
 | `POST` | `/v1/auth/resend-email-code` | none | Re-send the verification code (rate-limited, see below). |
 | `POST` | `/v1/auth/login` | none | `USER_PASSWORD_AUTH` against Cognito. Returns `{access_token, id_token, expires_in, user{user_id, name, currency}}` and sets a `rt` HttpOnly cookie. |
 | `POST` | `/v1/auth/refresh` | cookie | Read `rt` cookie, return new access + id tokens. |
-| `POST` | `/v1/auth/logout` | **JWT** | Revoke all refresh tokens via Cognito `GlobalSignOut`; clears the `rt` cookie. |
+| `POST` | `/v1/auth/logout` | **id-token JWT + `X-Cognito-Access-Token`** | Revoke all refresh tokens via Cognito `GlobalSignOut`; clears the `rt` cookie. See "Token shape on authenticated routes" below. |
 | `POST` | `/v1/auth/forgot-password` | none | Send password-reset code (rate-limited; shares cap with `resend-email-code`). |
 | `POST` | `/v1/auth/reset-password` | none | Confirm new password with the emailed code. |
+
+## Token shape on authenticated routes
+
+Every authenticated route expects:
+
+```
+Authorization: Bearer <id_token>
+```
+
+The **id token** carries the identity claims our `Principal` model needs
+(`custom:user_id`, `email`, `name`). Real Cognito *access* tokens omit
+those, so they're explicitly rejected on the `Authorization` header
+with a `UNAUTHENTICATED` 401.
+
+`POST /v1/auth/logout` additionally requires:
+
+```
+X-Cognito-Access-Token: <access_token>
+```
+
+This is the raw access token returned alongside the id token from
+`/v1/auth/login`; the backend forwards it to Cognito `GlobalSignOut`,
+which is the only API call in the auth feature that needs an access
+token. A request with a valid id token but no `X-Cognito-Access-Token`
+returns `400 MISSING_ACCESS_TOKEN` (and still clears the `rt` cookie
+so a partial logout doesn't leave a usable refresh token in the
+browser). API Gateway's HTTP API JWT authorizer accepts both id and
+access tokens at the gateway layer; the Lambda layer enforces the
+id-token-only invariant for Authorization.
 
 ## Rate Limiting
 
