@@ -125,6 +125,46 @@ def test_ulid_regex_accepts_valid() -> None:
     assert _ULID_RE.pattern == valid.pattern
 
 
+def test_base_exception_does_not_break_finally(
+    seed_config: AppConfig,  # noqa: ARG001
+) -> None:
+    """Regression: when a ``BaseException`` subclass (e.g. SystemExit)
+    skips the ``except Exception`` block, the ``finally`` access-log
+    line must still run successfully — meaning ``status_code`` is
+    pre-initialised, not annotation-only."""
+    import asyncio
+
+    from app.core.middleware import CoreMiddleware
+
+    middleware = CoreMiddleware(app=lambda *a, **kw: None)  # type: ignore[arg-type]
+
+    async def _call_next_raises_baseexc(_request: object) -> None:
+        raise SystemExit(0)
+
+    # Build a synthetic ASGI scope just enough for middleware.dispatch.
+    from starlette.requests import Request
+
+    scope: dict[str, object] = {
+        "type": "http",
+        "method": "GET",
+        "path": "/x",
+        "raw_path": b"/x",
+        "headers": [],
+        "query_string": b"",
+        "root_path": "",
+        "scheme": "http",
+        "server": ("test", 80),
+    }
+    request = Request(scope)
+
+    async def _drive() -> None:
+        # The dispatch must surface SystemExit, not NameError.
+        with pytest.raises(SystemExit):
+            await middleware.dispatch(request, _call_next_raises_baseexc)  # type: ignore[arg-type]
+
+    asyncio.run(_drive())
+
+
 def test_route_exception_logs_and_reraises(
     seed_config: AppConfig,
     caplog: pytest.LogCaptureFixture,

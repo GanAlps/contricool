@@ -48,7 +48,15 @@ class CoreMiddleware(BaseHTTPMiddleware):
             method=request.method,
         )
         started_ns = time.monotonic_ns()
-        status_code: int
+        # Pre-initialise so the ``finally`` access never NameErrors. If a
+        # ``BaseException`` subclass (KeyboardInterrupt / SystemExit) skips
+        # the ``except Exception`` block, ``status_code`` would otherwise
+        # be unbound and the access-log line would crash with NameError —
+        # which then chains via ``__context__`` and suppresses the original
+        # exception. 500 is the right default in that scenario; the dev
+        # who triggered it sees the original exception via the unhandled
+        # path.
+        status_code: int = 500
         try:
             response = await call_next(request)
             status_code = response.status_code
