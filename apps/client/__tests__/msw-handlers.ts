@@ -89,6 +89,54 @@ export const defaultHandlers = [
   http.post(`${BASE}/auth/reset-password`, async () =>
     HttpResponse.json({ password_reset: true }, { status: 200 }),
   ),
+  http.get(`${BASE}/friends`, async () =>
+    HttpResponse.json(
+      {
+        items: [
+          {
+            user_id: '01J0000000000000000000ALI',
+            name: 'Alice',
+            currency: 'USD',
+            since: '2026-04-01T00:00:00Z',
+          },
+          {
+            user_id: '01J0000000000000000000BOB',
+            name: 'Bob',
+            currency: 'USD',
+            since: '2026-04-02T00:00:00Z',
+          },
+        ],
+        next_cursor: null,
+      },
+      { status: 200 },
+    ),
+  ),
+  http.post(`${BASE}/friends/add`, async ({ request }) => {
+    const body = (await request.json()) as { email: string };
+    return HttpResponse.json(
+      {
+        user_id: '01J0000000000000000000NEW',
+        name: 'Newbie',
+        currency: 'USD',
+        since: '2026-04-29T12:00:00Z',
+        _email: body.email,
+      },
+      { status: 200 },
+    );
+  }),
+  http.get(`${BASE}/friends/:userId/balance`, async ({ params }) =>
+    HttpResponse.json(
+      {
+        user_id: params.userId,
+        currency: 'USD',
+        net: '0',
+        settlement_status: 'settled',
+        last_transaction_at: null,
+      },
+      { status: 200 },
+    ),
+  ),
+  http.delete(`${BASE}/friends/:userId`, async () => new HttpResponse(null, { status: 204 })),
 ];
 
 export const server = setupServer(...defaultHandlers);
