@@ -82,9 +82,20 @@ class AuthStack(Stack):
                 temp_password_validity=Duration.days(1),
             ),
             mfa=cognito.Mfa.OFF,
-            email=cognito.UserPoolEmail.with_cognito(
-                "ContriCool <no-reply@verificationemail.com>"
-            ),
+            # Cognito-managed sender at MVP. The argument is the
+            # ``Reply-To`` email address — Cognito enforces a strict
+            # ``localpart@domain`` regex (no display name wrapper, no
+            # spaces, no ``<>``). A previous attempt at
+            # ``"ContriCool <no-reply@verificationemail.com>"`` failed at
+            # CFN create time with InvalidParameterException because the
+            # value can't carry a friendly name.
+            #
+            # The friendly From name on Cognito's managed sender is fixed
+            # by AWS to "Cognito" / ``no-reply@verificationemail.com`` and
+            # cannot be overridden until we move to SES (Phase 7+). We
+            # don't need a non-default reply-to either; omit it so
+            # CloudFormation skips the field entirely.
+            email=cognito.UserPoolEmail.with_cognito(),
             account_recovery=cognito.AccountRecovery.EMAIL_ONLY,
             removal_policy=RemovalPolicy.RETAIN if is_prod else RemovalPolicy.DESTROY,
             deletion_protection=is_prod,

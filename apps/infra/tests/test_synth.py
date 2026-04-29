@@ -785,6 +785,38 @@ def test_auth_stack_user_pool_retention_in_prod_destroy_in_dev(
     assert dev_pool["Properties"].get("DeletionProtection") in (None, "INACTIVE")
 
 
+def test_auth_stack_email_config_matches_cognito_regex(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Cognito's API rejects ``ReplyToEmailAddress`` values that don't
+    match ``[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}]+@[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}]+``
+    — no spaces, no ``<>`` display-name wrapper. Lock the rule in synth
+    so any future ``with_cognito("Friendly <addr>")`` regresses here
+    rather than at CFN-create time on a real deploy."""
+    import re
+
+    template = _auth_stack("dev", cdk_env)
+    pool_props = next(iter(template.find_resources("AWS::Cognito::UserPool").values()))[
+        "Properties"
+    ]
+    email_config = pool_props.get("EmailConfiguration") or {}
+    reply_to = email_config.get("ReplyToEmailAddress")
+    if reply_to is not None:
+        # Equivalent of Cognito's regex (Python ``re`` does not natively
+        # support \\p{} character properties, so we approximate with the
+        # narrow subset of characters Cognito accepts that we care about).
+        assert re.fullmatch(r"[^\s<>]+@[^\s<>]+", reply_to), (
+            f"ReplyToEmailAddress {reply_to!r} would be rejected by "
+            f"Cognito's regex constraint."
+        )
+        # And specifically reject the 'Friendly <email>' shape.
+        assert "<" not in reply_to and ">" not in reply_to, (
+            "ReplyToEmailAddress must not carry a display-name wrapper. "
+            "The Cognito-managed sender's friendly From name is fixed by "
+            "AWS and cannot be overridden via the reply-to field."
+        )
+
+
 def test_auth_stack_account_recovery_email_only(cdk_env: cdk.Environment) -> None:
     template = _auth_stack("dev", cdk_env)
     pool_props = next(iter(template.find_resources("AWS::Cognito::UserPool").values()))[
