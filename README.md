@@ -70,11 +70,11 @@ If you hit an ergonomic gitleaks false-positive on an obviously-safe doc placeho
 contricool/
   apps/
     api/              # FastAPI Lambda (Phase 1+)
-    client/           # Expo + RN + RN-Web — auth screens (Phase 2d), see apps/client/README.md
+    client/           # Expo + RN + RN-Web — auth screens deployed to S3+CloudFront (Phase 2d/2e)
     infra/            # AWS CDK in Python (Phase 1)
   packages/
-    openapi/          # generated openapi.yaml (Phase 2+)
-    client-sdk/       # generated TS SDK (Phase 2+)
+    openapi/          # generated openapi.yaml (Phase 2e)
+    client-sdk/       # generated TS SDK from openapi.yaml (Phase 2e)
   specs/              # design docs (read these first)
   .github/workflows/  # CI + deploy
   CLAUDE.md           # project red lines + conventions

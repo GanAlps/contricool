@@ -26,9 +26,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: "pnpm"
       # The API Lambda image is arm64 but GitHub-hosted runners are x86_64.
       # qemu provides binfmt_misc emulation so ``RUN`` steps inside the
       # arm64 base image can execute. buildx is the modern docker build
@@ -39,6 +41,21 @@ jobs:
         run: npm install -g aws-cdk
       - name: Install infra deps
         run: pip install -e 'apps/infra[dev]'
+      # Phase 2e: build the client SDK + Expo web bundle BEFORE
+      # `cdk deploy` so WebStack's BucketDeployment has the artefact.
+      # Same commands the `client` and `client-sdk` CI jobs run, so
+      # CI-vs-deploy bundle drift is impossible.
+      - name: Install workspace deps
+        run: pnpm install --frozen-lockfile
+      - name: Build SDK (generates schema types)
+        run: pnpm --filter @contricool/client-sdk build
+      - name: Build Expo web bundle
+        run: pnpm --filter @contricool/client build:web
+      - name: Verify bundle exists
+        run: test -f apps/client/dist/index.html
+      - name: Bundle-size gate
+        working-directory: apps/client
+        run: node scripts/check-bundle-size.mjs
       - name: Configure AWS credentials (Dev deploy via OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -155,6 +172,26 @@ jobs:
           done
           echo "::error::Smoke failed after ${max_attempts} attempts"
           exit 1
+      - name: Curl SPA shell at / (Phase 2e — proves bundle deployed)
+        env:
+          CF_DOMAIN: ${{ needs.deploy-dev.outputs.cf_domain }}
+        run: |
+          set -euo pipefail
+          attempt=0
+          max_attempts=6
+          backoff=10
+          while [ "${attempt}" -lt "${max_attempts}" ]; do
+            body="$(curl -fsS "https://${CF_DOMAIN}/" || echo '')"
+            if echo "${body}" | grep -q '<script'; then
+              echo "SPA shell served from /"
+              exit 0
+            fi
+            echo "Attempt $((attempt + 1))/${max_attempts}: no <script> tag yet"
+            attempt=$((attempt + 1))
+            sleep "${backoff}"
+          done
+          echo "::error::SPA shell missing — Phase-1 placeholder still served?"
+          exit 1
 
   deploy-prod:
     name: deploy-prod
@@ -168,9 +205,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: "pnpm"
       # arm64 cross-build emulation; same rationale as deploy-dev. CDK
       # asset hash is content-addressed, so prod's image is reused from
       # ECR without a second build — but buildx still needs to be
@@ -181,6 +220,18 @@ jobs:
         run: npm install -g aws-cdk
       - name: Install infra deps
         run: pip install -e 'apps/infra[dev]'
+      # Phase 2e — same SDK + bundle pre-build as deploy-dev.
+      - name: Install workspace deps
+        run: pnpm install --frozen-lockfile
+      - name: Build SDK (generates schema types)
+        run: pnpm --filter @contricool/client-sdk build
+      - name: Build Expo web bundle
+        run: pnpm --filter @contricool/client build:web
+      - name: Verify bundle exists
+        run: test -f apps/client/dist/index.html
+      - name: Bundle-size gate
+        working-directory: apps/client
+        run: node scripts/check-bundle-size.mjs
       - name: Configure AWS credentials (Prod deploy via OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -312,6 +363,26 @@ jobs:
             sleep "${backoff}"
           done
           echo "::error::Smoke failed after ${max_attempts} attempts"
+          exit 1
+      - name: Curl SPA shell at / (Phase 2e — proves bundle deployed)
+        env:
+          CF_DOMAIN: ${{ needs.deploy-prod.outputs.cf_domain }}
+        run: |
+          set -euo pipefail
+          attempt=0
+          max_attempts=6
+          backoff=10
+          while [ "${attempt}" -lt "${max_attempts}" ]; do
+            body="$(curl -fsS "https://${CF_DOMAIN}/" || echo '')"
+            if echo "${body}" | grep -q '<script'; then
+              echo "SPA shell served from /"
+              exit 0
+            fi
+            echo "Attempt $((attempt + 1))/${max_attempts}: no <script> tag yet"
+            attempt=$((attempt + 1))
+            sleep "${backoff}"
+          done
+          echo "::error::SPA shell missing — Phase-1 placeholder still served?"
           exit 1
 
   tag-release:
