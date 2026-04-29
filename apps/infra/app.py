@@ -148,7 +148,9 @@ for env_name, cfg in ENV_CONFIGS.items():
         log_retention_days=cfg["log_retention_days"],
         xray_sampling_rate=cfg["xray_sampling_rate"],
         reserved_concurrent_executions=cfg["api_reserved_concurrency"],
+        prod_cmk=shared.prod_cmk if is_prod else None,
     )
+    api.add_dependency(shared)
 
     web = WebStack(
         app,

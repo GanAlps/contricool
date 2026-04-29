@@ -358,6 +358,72 @@ def test_api_stack_synthesizes(cdk_env: cdk.Environment) -> None:
     )
 
 
+def test_api_stack_lambda_can_read_ssm_for_cold_start_config(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Phase 2b's ``app.core.config.load`` calls ``ssm:GetParameters`` at
+    cold start. Without an IAM grant the Lambda fails to start with
+    AccessDenied. Lock the grant + scope so a future refactor can't
+    drop it silently."""
+    import json
+
+    app = cdk.App()
+    stack = ApiStack(
+        app,
+        "Contricool-Dev-Api",
+        env=cdk_env,
+        env_name="dev",
+        snapstart=False,
+        log_retention_days=14,
+        xray_sampling_rate=1.0,
+    )
+    template = assertions.Template.from_stack(stack)
+    policies = template.find_resources("AWS::IAM::Policy")
+    blob = json.dumps(list(policies.values()))
+    assert "ssm:GetParameters" in blob, (
+        "ApiStack must grant ssm:GetParameters to the Lambda role"
+    )
+    assert "parameter/contricool/dev/" in blob, (
+        "SSM grant must be scoped to /contricool/<env>/* — "
+        "wildcard SSM read would let the function dump every parameter"
+    )
+
+
+def test_api_stack_prod_lambda_can_decrypt_pii_salt(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Prod's pii-salt is encrypted with the project CMK; the Lambda must
+    have ``kms:Decrypt`` to read the SecureString back. Dev uses
+    ``alias/aws/ssm`` so no explicit grant is needed there."""
+    import json
+
+    from aws_cdk import aws_kms as kms
+
+    app = cdk.App()
+    cmk_scope = cdk.Stack(app, "CmkScope", env=cdk_env)
+    cmk = kms.Key.from_key_arn(
+        cmk_scope,
+        "Cmk",
+        f"arn:aws:kms:us-west-2:111111111111:key/{'p' * 32}",
+    )
+    stack = ApiStack(
+        app,
+        "Contricool-Prod-Api",
+        env=cdk_env,
+        env_name="prod",
+        snapstart=False,
+        log_retention_days=14,
+        xray_sampling_rate=0.1,
+        prod_cmk=cmk,
+    )
+    template = assertions.Template.from_stack(stack)
+    policies = template.find_resources("AWS::IAM::Policy")
+    blob = json.dumps(list(policies.values()))
+    assert "kms:Decrypt" in blob, (
+        "Prod ApiStack must grant kms:Decrypt for the SecureString PII salt"
+    )
+
+
 def test_web_stack_synthesizes(cdk_env: cdk.Environment) -> None:
     app = cdk.App()
     api = ApiStack(
@@ -815,7 +881,15 @@ def test_data_stack_users_table_retention_in_prod_destroy_in_dev(
 
 
 def test_monitoring_stack_prod_has_dashboard(cdk_env: cdk.Environment) -> None:
+    from aws_cdk import aws_kms as kms
+
     app = cdk.App()
+    cmk_scope = cdk.Stack(app, "MonitoringCmkScope", env=cdk_env)
+    cmk = kms.Key.from_key_arn(
+        cmk_scope,
+        "Cmk",
+        f"arn:aws:kms:us-west-2:111111111111:key/{'p' * 32}",
+    )
     api = ApiStack(
         app,
         "Contricool-Prod-Api",
@@ -824,6 +898,7 @@ def test_monitoring_stack_prod_has_dashboard(cdk_env: cdk.Environment) -> None:
         snapstart=True,
         log_retention_days=14,
         xray_sampling_rate=0.1,
+        prod_cmk=cmk,
     )
     mon = MonitoringStack(
         app,
