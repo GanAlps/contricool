@@ -11,6 +11,7 @@ from decimal import Decimal
 
 from email_validator import EmailNotValidError, validate_email
 
+from app.core.lookup_hash import email_hash
 from app.core.observability import logger
 from app.features.friends import repository as repo
 from app.features.friends.cursor import (
@@ -42,7 +43,6 @@ from app.features.friends.rate_limit import (
     FriendAddRateLimitExceeded,
     consume_friend_add,
 )
-
 
 # Phone-shaped: starts with `+` followed by digits (E.164), OR is 7+
 # chars of only digits / hyphens / spaces. False-positives are fine —
@@ -85,6 +85,9 @@ def add_friend(*, requester_id: str, email: str) -> AddFriendResponse:
     409 forever.
     """
     normalised_email = _normalise_email(email)
+    # NFR4.2: log only the email *hash* (the same value already
+    # written to GSI1 for the lookup) — never the raw email.
+    em_hash = email_hash(normalised_email)
 
     try:
         consume_friend_add(requester_id)
@@ -95,14 +98,14 @@ def add_friend(*, requester_id: str, email: str) -> AddFriendResponse:
     if target_id is None:
         logger.info(
             "friend_add_user_not_found",
-            extra={"requester_id": requester_id},
+            extra={"requester_id": requester_id, "email_hash": em_hash},
         )
         raise UserNotFoundError()
 
     if target_id == requester_id:
         logger.info(
             "friend_add_self",
-            extra={"requester_id": requester_id},
+            extra={"requester_id": requester_id, "email_hash": em_hash},
         )
         raise SelfAddForbiddenError()
 
@@ -113,7 +116,11 @@ def add_friend(*, requester_id: str, email: str) -> AddFriendResponse:
         # the explicit not-found branch above.
         logger.error(
             "friend_add_meta_missing",
-            extra={"requester_id": requester_id, "friend_id": target_id},
+            extra={
+                "requester_id": requester_id,
+                "friend_id": target_id,
+                "email_hash": em_hash,
+            },
         )
         raise UserNotFoundError()
 
@@ -124,13 +131,21 @@ def add_friend(*, requester_id: str, email: str) -> AddFriendResponse:
     except repo.ConflictError as exc:
         logger.info(
             "friend_add_conflict",
-            extra={"requester_id": requester_id, "friend_id": target_id},
+            extra={
+                "requester_id": requester_id,
+                "friend_id": target_id,
+                "email_hash": em_hash,
+            },
         )
         raise ConflictError() from exc
 
     logger.info(
         "friend_added",
-        extra={"requester_id": requester_id, "friend_id": target_id},
+        extra={
+            "requester_id": requester_id,
+            "friend_id": target_id,
+            "email_hash": em_hash,
+        },
     )
     return AddFriendResponse(
         user_id=target_id,

@@ -52,22 +52,38 @@ class FriendRow:
 
 
 _default_table: Table | None = None
+_default_resource: object | None = None
+
+
+def _ddb_resource() -> object:
+    """Module-scope DDB resource, re-used across all repository ops
+    (Table + BatchGetItem) so we don't rebuild ``boto3.resource`` on
+    every call."""
+    global _default_resource
+    if _default_resource is None:
+        cfg = config.load()
+        _default_resource = boto3.resource("dynamodb", region_name=cfg.aws_region)
+    return _default_resource
 
 
 def _table() -> Table:
     global _default_table
     if _default_table is None:
         cfg = config.load()
-        _default_table = boto3.resource(
-            "dynamodb", region_name=cfg.aws_region
-        ).Table(cfg.users_table_name)
+        _default_table = _ddb_resource().Table(cfg.users_table_name)  # type: ignore[attr-defined]
     return _default_table
 
 
 def _set_table_for_tests(table: Table | None) -> None:
-    """Inject a moto-backed Table for tests."""
-    global _default_table
+    """Inject a moto-backed Table for tests.
+
+    Drops the cached ``boto3.resource`` so a subsequent test that
+    patches ``boto3.resource`` rebuilds the resource through the
+    patch (per-test isolation).
+    """
+    global _default_table, _default_resource
     _default_table = table
+    _default_resource = None
 
 
 # ---- User lookups ------------------------------------------------------
@@ -134,13 +150,13 @@ def batch_get_user_metas(user_ids: list[str]) -> dict[str, UserMeta]:
     cfg = config.load()
     table_name = cfg.users_table_name
     pending = [{"PK": f"USER#{uid}", "SK": "META"} for uid in user_ids]
-    client = boto3.resource("dynamodb", region_name=cfg.aws_region)
+    resource = _ddb_resource()
 
     out: dict[str, UserMeta] = {}
     attempts_left = _BATCH_GET_MAX_RETRIES + 1
     while pending and attempts_left > 0:
         attempts_left -= 1
-        response = client.batch_get_item(
+        response = resource.batch_get_item(  # type: ignore[attr-defined]
             RequestItems={
                 table_name: {
                     "Keys": pending,
@@ -189,6 +205,14 @@ def _friendship_key(a: str, b: str) -> dict[str, str]:
     return {"PK": f"USER#{min_id}", "SK": f"FRIEND#{max_id}"}
 
 
+def now_iso() -> tuple[datetime, str]:
+    """Return ``(now_dt, "...Z")`` — the canonical timestamp pair used
+    by friendship rows and tests. Single source of truth so
+    representations stay byte-identical across producer + consumer."""
+    now = datetime.now(UTC).replace(microsecond=0)
+    return now, now.isoformat().replace("+00:00", "Z")
+
+
 def create_friendship(a_id: str, b_id: str, *, created_by: str) -> datetime:
     """Insert the canonical-pair friendship row.
 
@@ -201,8 +225,7 @@ def create_friendship(a_id: str, b_id: str, *, created_by: str) -> datetime:
     if a_id == b_id:
         raise ValueError("cannot create self-friendship")
     min_id, max_id = _canonical_pair(a_id, b_id)
-    now = datetime.now(UTC).replace(microsecond=0)
-    iso = now.isoformat().replace("+00:00", "Z")
+    now, iso = now_iso()
     item: dict[str, Any] = {
         "PK": f"USER#{min_id}",
         "SK": f"FRIEND#{max_id}",

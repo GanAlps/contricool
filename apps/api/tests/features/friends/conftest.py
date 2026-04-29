@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import ExitStack
-from datetime import UTC, datetime
 from typing import Any
 
 import boto3
@@ -133,8 +132,10 @@ def seed_user(
 ) -> None:
     """Write a META row + the GSI1 EMAIL-projection so lookups hit."""
     from app.core.lookup_hash import email_hash
+    from app.features.friends.repository import now_iso
 
     table = env["table"]
+    _, iso = now_iso()
     table.put_item(  # type: ignore[attr-defined]
         Item={
             "PK": f"USER#{user_id}",
@@ -144,23 +145,20 @@ def seed_user(
             "display_name": name,
             "currency": currency,
             "status": "active",
-            "created_at": _now_iso(),
+            "created_at": iso,
         }
     )
-
-
-def _now_iso() -> str:
-    iso = datetime.now(UTC).replace(microsecond=0).isoformat()
-    return iso.replace("+00:00", "Z")
 
 
 def seed_friendship(
     env: dict[str, object], *, a_id: str, b_id: str, created_by: str | None = None
 ) -> None:
     """Write a canonical-pair friendship row (test helper)."""
+    from app.features.friends.repository import now_iso
+
     table = env["table"]
     min_id, max_id = (a_id, b_id) if a_id < b_id else (b_id, a_id)
-    now = _now_iso()
+    _, now = now_iso()
     table.put_item(  # type: ignore[attr-defined]
         Item={
             "PK": f"USER#{min_id}",

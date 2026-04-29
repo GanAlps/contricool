@@ -136,3 +136,39 @@ def test_n10_no_raw_email_in_logs_on_user_not_found(
         )
     for record in caplog.records:
         assert "ghost@example.com" not in str(record.message)
+
+
+def test_friend_added_log_carries_email_hash(
+    friends_client: TestClient,
+    friends_env: dict[str, object],
+    authed_headers: dict[str, str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """NFR4.2: the friend_added log line carries an email_hash field
+    so on-call can correlate without ever seeing the raw address."""
+    from app.core.lookup_hash import email_hash
+
+    seed_user(
+        friends_env, user_id=REQUESTER_ID, email="r@example.com", name="R"
+    )
+    seed_user(
+        friends_env,
+        user_id="01HKTARGET0000000000000000",
+        email="target@example.com",
+        name="T",
+    )
+    with caplog.at_level("INFO"):
+        r = friends_client.post(
+            "/v1/friends/add",
+            json={"email": "target@example.com"},
+            headers=authed_headers,
+        )
+    assert r.status_code == 200
+    expected = email_hash("target@example.com")
+    matching = [
+        rec
+        for rec in caplog.records
+        if "friend_added" in str(rec.message)
+        and getattr(rec, "email_hash", None) == expected
+    ]
+    assert matching, "friend_added log line missing email_hash field"
