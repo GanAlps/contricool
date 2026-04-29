@@ -139,3 +139,29 @@ jobs:
       - name: openapi-check placeholder
         run: |
           echo "openapi-check is a no-op until apps/api adds Pydantic models in Phase 2."
+
+  client:
+    name: client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        # pnpm version comes from `packageManager` in root package.json
+        # (pnpm@9.15.0); the action errors if `version` is also pinned here.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+      - name: Install workspace deps
+        run: pnpm install --frozen-lockfile
+      - name: Lint (Biome)
+        run: pnpm --filter @contricool/client lint
+      - name: Typecheck
+        run: pnpm --filter @contricool/client typecheck
+      - name: Test with coverage
+        run: pnpm --filter @contricool/client test:coverage
+      - name: Build web bundle
+        run: pnpm --filter @contricool/client build:web
+      - name: Bundle size gate
+        working-directory: apps/client
+        run: node scripts/check-bundle-size.mjs

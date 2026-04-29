@@ -70,7 +70,7 @@ If you hit an ergonomic gitleaks false-positive on an obviously-safe doc placeho
 contricool/
   apps/
     api/              # FastAPI Lambda (Phase 1+)
-    client/           # Expo + RN + RN-Web (Phase 2+)
+    client/           # Expo + RN + RN-Web — auth screens (Phase 2d), see apps/client/README.md
     infra/            # AWS CDK in Python (Phase 1)
   packages/
     openapi/          # generated openapi.yaml (Phase 2+)

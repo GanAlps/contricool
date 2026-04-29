@@ -1,0 +1,22 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    // Mirror Metro's platform-specific resolution.  Lets us write
+    // `import driver from './auth-driver'` and have TS pick up
+    // `auth-driver.web.ts` (the same file the web bundler picks up).
+    "moduleSuffixes": [".web", ""],
+    "paths": {
+      "~/*": ["./*"]
+    },
+    "types": ["vitest/globals", "@testing-library/jest-dom"]
+  },
+  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts", "nativewind-env.d.ts"],
+  "exclude": ["node_modules", "dist", ".expo", "coverage"]
+}
