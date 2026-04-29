@@ -57,12 +57,23 @@ function defaultRefreshUrl(originalUrl: string): string {
 export function authMiddleware(opts: AuthMiddlewareOptions): Middleware {
   return {
     async onRequest({ request }: MiddlewareCallbackParams): Promise<Request> {
-      const url = new URL(request.url);
-      if (!isAuthBootstrapPath(url.pathname)) {
-        const t = opts.getAccessToken();
-        if (t) {
-          request.headers.set('authorization', `Bearer ${t}`);
-        }
+      // Attach the bearer whenever a token is available.
+      //
+      // The original Phase 2d code skipped this for any `/auth/*` path
+      // on the assumption that all auth-bootstrap routes are public.
+      // That assumption was wrong: `/auth/logout` is the one
+      // **authenticated** route in the auth bootstrap (Phase 2c R6.1).
+      // Without the bearer, the JWT authorizer 401s before the handler
+      // runs, so Cognito GlobalSignOut never fires AND the backend
+      // never sends the `Set-Cookie: rt=; Max-Age=0` cookie clear —
+      // hard-reload after sign-out re-hydrates the session.
+      //
+      // The other `/auth/*` routes (login, signup, refresh, …) ignore
+      // the Authorization header entirely, so attaching it there is a
+      // harmless no-op.
+      const t = opts.getAccessToken();
+      if (t) {
+        request.headers.set('authorization', `Bearer ${t}`);
       }
       // Phase 2e — capture the body BEFORE openapi-fetch consumes the
       // request stream.  The 401-retry path below has to send the same

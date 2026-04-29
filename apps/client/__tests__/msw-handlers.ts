@@ -58,7 +58,18 @@ export const defaultHandlers = [
       { status: 200 },
     ),
   ),
-  http.post(`${BASE}/auth/logout`, async () => new HttpResponse(null, { status: 204 })),
+  http.post(`${BASE}/auth/logout`, async ({ request }) => {
+    // Phase 2c R6.1: logout is the authenticated /auth/* route.  The
+    // backend's JWT authorizer rejects without a bearer; mirror that
+    // here so future regressions show up as failing tests.
+    if (!request.headers.get('authorization')?.startsWith('Bearer ')) {
+      return HttpResponse.json(
+        { error: { code: 'UNAUTHENTICATED', message: 'no bearer', request_id: 'r' } },
+        { status: 401 },
+      );
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
   http.post(`${BASE}/auth/forgot-password`, async () =>
     HttpResponse.json({ status: 'RESET_CODE_SENT' }, { status: 202 }),
   ),

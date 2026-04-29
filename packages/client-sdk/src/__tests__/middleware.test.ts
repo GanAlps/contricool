@@ -45,7 +45,23 @@ describe('authMiddleware.onRequest', () => {
     expect(out.headers.get('authorization')).toBe('Bearer tok-1');
   });
 
-  it('skips Authorization on /auth/* paths even when a token is available', async () => {
+  it('attaches Authorization on /auth/logout (the one authenticated /auth/* route)', async () => {
+    // Regression: Phase 2d's middleware skipped bearer attach on every
+    // `/auth/*` path.  Logout needs the bearer for the JWT authorizer
+    // to succeed and for Cognito GlobalSignOut to clear server-side
+    // refresh tokens; without it the cookie clear never happens and
+    // hard-reload after sign-out re-hydrates the session.
+    const mw = makeMw({ getAccessToken: () => 'tok-1' });
+    const req = new Request('http://localhost/v1/auth/logout', { method: 'POST' });
+    const out = (await mw.onRequest!({
+      request: req,
+      schemaPath: '',
+      params: {},
+    } as never)) as Request;
+    expect(out.headers.get('authorization')).toBe('Bearer tok-1');
+  });
+
+  it('attaches Authorization on /auth/login too (public routes ignore it; simpler than special-casing)', async () => {
     const mw = makeMw({ getAccessToken: () => 'tok-1' });
     const req = new Request('http://localhost/v1/auth/login', { method: 'POST' });
     const out = (await mw.onRequest!({
@@ -53,7 +69,7 @@ describe('authMiddleware.onRequest', () => {
       schemaPath: '',
       params: {},
     } as never)) as Request;
-    expect(out.headers.get('authorization')).toBeNull();
+    expect(out.headers.get('authorization')).toBe('Bearer tok-1');
   });
 
   it('skips Authorization when no token is available', async () => {
