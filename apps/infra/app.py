@@ -150,11 +150,18 @@ for env_name, cfg in ENV_CONFIGS.items():
         snapstart=cfg["snapstart"],
         log_retention_days=cfg["log_retention_days"],
         xray_sampling_rate=cfg["xray_sampling_rate"],
+        user_pool=auth.user_pool,
+        web_client=auth.web_client,
+        ios_client=auth.ios_client,
+        android_client=auth.android_client,
+        users_table=data.users_table,
         reserved_concurrent_executions=cfg["api_reserved_concurrency"],
         prod_cmk=shared.prod_cmk if is_prod else None,
         app_version=APP_VERSION,
     )
     api.add_dependency(shared)
+    api.add_dependency(auth)
+    api.add_dependency(data)
 
     web = WebStack(
         app,
