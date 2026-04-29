@@ -93,3 +93,20 @@ export type RefreshResponse =
 
 export type AuthUser = SignInResponse['user'];
 export type Currency = AuthUser['currency'];
+
+// ---------------------------------------------------------------------------
+// Friends surface (Phase 3b client consumes these aliases).
+// ---------------------------------------------------------------------------
+
+export type AddFriendRequest = NonNullable<
+  AuthPaths['/friends/add']['post']['requestBody']
+>['content']['application/json'];
+export type AddFriendResponse =
+  AuthPaths['/friends/add']['post']['responses']['200']['content']['application/json'];
+
+export type ListFriendsResponse =
+  AuthPaths['/friends']['get']['responses']['200']['content']['application/json'];
+export type FriendItem = ListFriendsResponse['items'][number];
+
+export type FriendBalanceResponse =
+  AuthPaths['/friends/{user_id}/balance']['get']['responses']['200']['content']['application/json'];

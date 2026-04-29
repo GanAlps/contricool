@@ -38,6 +38,15 @@ export type VerifyEmailValues = z.infer<typeof VerifyEmailSchema>;
 export const ForgotPasswordSchema = z.object({ email });
 export type ForgotPasswordValues = z.infer<typeof ForgotPasswordSchema>;
 
+// Lenient by design: the backend distinguishes phone-shape (400
+// INVALID_IDENTIFIER) from malformed-email (422 VALIDATION_ERROR).
+// Doing client-side `.email()` validation would coalesce both into a
+// single client error, losing the per-shape copy.
+export const AddFriendSchema = z.object({
+  email: z.string().trim().min(1, 'Required'),
+});
+export type AddFriendValues = z.infer<typeof AddFriendSchema>;
+
 export const ResetPasswordSchema = z
   .object({
     email,
