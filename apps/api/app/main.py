@@ -16,6 +16,8 @@ from fastapi import FastAPI
 
 from app.core import config
 from app.core.middleware import install_core_middleware
+from app.features.auth import routes as auth_routes
+from app.features.auth.errors import install_error_handlers
 from app.routes import health
 
 
@@ -37,7 +39,9 @@ def create_app(*, load_config: bool = True) -> FastAPI:
         openapi_url="/openapi.json",
     )
     install_core_middleware(api)
+    install_error_handlers(api)
     api.include_router(health.router, prefix="/v1", tags=["health"])
+    api.include_router(auth_routes.router, prefix="/v1")
     return api
 
 

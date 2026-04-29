@@ -46,6 +46,7 @@ class AuthError(Exception):
         message: str,
         details: list[dict[str, str]] | None = None,
         retry_after_seconds: int | None = None,
+        clear_refresh_cookie: bool = False,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -53,6 +54,7 @@ class AuthError(Exception):
         self.message = message
         self.details = details
         self.retry_after_seconds = retry_after_seconds
+        self.clear_refresh_cookie = clear_refresh_cookie
 
 
 def _request_id(request: Request) -> str:
@@ -80,7 +82,7 @@ async def auth_error_handler(request: Request, exc: AuthError) -> JSONResponse:
     headers: dict[str, str] = {}
     if exc.retry_after_seconds is not None:
         headers["Retry-After"] = str(exc.retry_after_seconds)
-    return JSONResponse(
+    response = JSONResponse(
         status_code=exc.http_status,
         content=_envelope(
             code=exc.code,
@@ -90,6 +92,9 @@ async def auth_error_handler(request: Request, exc: AuthError) -> JSONResponse:
         ),
         headers=headers,
     )
+    if exc.clear_refresh_cookie:
+        response.delete_cookie(key="rt", path="/v1/auth")
+    return response
 
 
 async def unauthenticated_handler(
