@@ -309,12 +309,23 @@ class ApiStack(Stack):
 
         # Public auth-bootstrap routes — explicit, no authorizer. HTTP
         # API picks the more-specific match before the catch-all.
+        # We track each route's CfnRoute so the Stage can declare an
+        # explicit dependency on the throttled subset (see below): when
+        # a stack adds a new route plus a per-route ``RouteSettings``
+        # entry referencing it in the same deployment, CloudFormation
+        # otherwise updates the Stage before the route exists and
+        # rejects the changeset with NotFoundException.
+        public_routes_by_key: dict[str, cdk.CfnResource] = {}
         for path in _PUBLIC_AUTH_PATHS:
-            self.api_gateway.add_routes(
+            created = self.api_gateway.add_routes(
                 path=path,
                 methods=[apigwv2.HttpMethod.POST],
                 integration=integration,
             )
+            for route in created:
+                cfn_route = route.node.default_child
+                assert isinstance(cfn_route, cdk.CfnResource)
+                public_routes_by_key[f"POST {path}"] = cfn_route
 
         # ``/v1/health`` is also public; it's already implicit under the
         # catch-all pattern below, so we declare an explicit route to
@@ -369,6 +380,18 @@ class ApiStack(Stack):
                 "RouteSettings",
                 _ROUTE_THROTTLES,
             )
+            # Tie the Stage update to the throttled routes' creation so
+            # CloudFormation can't try to apply ``RouteSettings`` before
+            # the referenced routes exist. Without this, adding a new
+            # throttled route plus its RouteSettings entry in the same
+            # deployment fails with "Unable to find Route by key …".
+            for route_key in _ROUTE_THROTTLES:
+                throttled_route = public_routes_by_key.get(route_key)
+                assert throttled_route is not None, (
+                    f"throttled route {route_key!r} missing from "
+                    f"_PUBLIC_AUTH_PATHS — keep the two lists in sync"
+                )
+                cfn_default_stage.add_dependency(throttled_route)
 
         cdk.CfnOutput(
             self,
