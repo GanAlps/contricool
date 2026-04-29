@@ -48,13 +48,13 @@ from aws_cdk import (
     aws_kms as kms,
 )
 from aws_cdk import (
-    aws_ssm as ssm,
-)
-from aws_cdk import (
     aws_lambda as lambda_,
 )
 from aws_cdk import (
     aws_logs as logs,
+)
+from aws_cdk import (
+    aws_ssm as ssm,
 )
 from constructs import Construct
 
