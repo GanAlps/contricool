@@ -3,10 +3,11 @@
 Spins up:
 - One account-wide ``Contricool-Shared`` stack (OIDC, deploy roles, Budgets,
   CloudTrail, KMS CMK, SNS alerts topic).
-- Per-environment stacks (``Contricool-{Dev,Prod}-{Api,Web,Edge,Monitoring}``).
+- Per-environment stacks: ``Contricool-{Dev,Prod}-{Api,Web,Auth,Data,Monitoring}``.
 
-The stacks for ``Data`` and ``Auth`` are intentionally absent until Phase 2 —
-adding empty CloudFormation stacks now would only add deploy noise.
+``Auth`` and ``Data`` were added in Phase 2a; both stand up empty resources
+(Cognito User Pool with no users, DDB Users table with no rows). Phase 2b/2c
+wires the API Lambda to read them.
 
 Configuration that varies per environment is read from environment variables
 (never hard-coded — see CLAUDE.md red-line 1):
@@ -27,6 +28,8 @@ import aws_cdk as cdk
 
 from aspects.security_aspect import SecurityAspect
 from stacks.api_stack import ApiStack
+from stacks.auth_stack import AuthStack
+from stacks.data_stack import DataStack
 from stacks.monitoring_stack import MonitoringStack
 from stacks.shared_stack import SharedStack
 from stacks.web_stack import WebStack
@@ -115,6 +118,26 @@ shared = SharedStack(
 # Per-environment stacks.
 for env_name, cfg in ENV_CONFIGS.items():
     suffix = env_name.capitalize()  # "Dev" or "Prod"
+    is_prod = env_name == "prod"
+    prod_cmk_arn = shared.prod_cmk.key_arn if is_prod else None
+
+    auth = AuthStack(
+        app,
+        f"Contricool-{suffix}-Auth",
+        env=cdk_env,
+        env_name=env_name,
+        prod_cmk_arn=prod_cmk_arn,
+    )
+    auth.add_dependency(shared)
+
+    data = DataStack(
+        app,
+        f"Contricool-{suffix}-Data",
+        env=cdk_env,
+        env_name=env_name,
+        prod_cmk=shared.prod_cmk if is_prod else None,
+    )
+    data.add_dependency(shared)
 
     api = ApiStack(
         app,
@@ -149,6 +172,8 @@ for env_name, cfg in ENV_CONFIGS.items():
     monitoring.add_dependency(api)
 
     # Apply per-env tag to every resource in per-env stacks.
+    cdk.Tags.of(auth).add("env", env_name)
+    cdk.Tags.of(data).add("env", env_name)
     cdk.Tags.of(api).add("env", env_name)
     cdk.Tags.of(web).add("env", env_name)
     cdk.Tags.of(monitoring).add("env", env_name)

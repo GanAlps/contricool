@@ -354,6 +354,28 @@ class SharedStack(Stack):
                 ],
             )
         )
+        # Hard guardrail on the PII salt path. The PutParameter grant above
+        # is wildcarded across ``/contricool/*`` so deploy.yml can write
+        # CloudFront domains, Cognito IDs, table names, etc. without
+        # per-key boilerplate — but the pii-salt SecureString must be
+        # owned exclusively by the AuthStack custom resource (rotation
+        # invalidates every email lookup row). An explicit Deny on
+        # ``parameter/contricool/*/pii-salt`` short-circuits any future
+        # deploy.yml step or careless ad-hoc script that tries to write
+        # to it; IAM Deny beats Allow on every evaluation.
+        role.add_to_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.DENY,
+                actions=[
+                    "ssm:PutParameter",
+                    "ssm:DeleteParameter",
+                    "ssm:DeleteParameters",
+                ],
+                resources=[
+                    f"arn:aws:ssm:{self._region}:{self._account}:parameter/contricool/*/pii-salt",
+                ],
+            )
+        )
         # Allow reading the API Lambda's function metadata. ``deploy.yml``
         # calls ``aws lambda get-function`` after each cdk deploy to capture
         # ``CodeSha256`` for the dev/prod image-match contract. Scoped to

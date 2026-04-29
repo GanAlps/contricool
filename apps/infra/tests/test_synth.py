@@ -13,6 +13,8 @@ import pytest
 from aws_cdk import assertions
 
 from stacks.api_stack import ApiStack
+from stacks.auth_stack import AuthStack
+from stacks.data_stack import DataStack
 from stacks.monitoring_stack import MonitoringStack
 from stacks.shared_stack import SharedStack
 from stacks.web_stack import WebStack
@@ -159,6 +161,85 @@ def test_dev_deploy_role_cannot_write_shared_stack(cdk_env: cdk.Environment) -> 
                 assert "Shared" not in blob, (
                     f"Dev role grants CFN write on a Shared resource: {blob}"
                 )
+
+
+def test_deploy_roles_explicitly_deny_writes_to_pii_salt(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Deploy roles need ``ssm:PutParameter`` on the wildcard
+    ``/contricool/*`` path so deploy.yml can publish CloudFront domains,
+    Cognito IDs, and table names. An explicit Deny on
+    ``/contricool/*/pii-salt`` ensures the pii-salt SSM SecureString stays
+    owned exclusively by the AuthStack custom resource — rotation breaks
+    every email lookup row, so the IAM layer enforces the no-rotation rule
+    that ``test_deploy_yaml_writes_cognito_and_ddb_ids_to_ssm`` only
+    enforces in the workflow text."""
+    import json
+
+    app = cdk.App()
+    stack = SharedStack(
+        app,
+        "Contricool-Shared",
+        env=cdk_env,
+        github_repo="GanAlps/contricool",
+        alerts_email="ops@example.invalid",
+    )
+    template = assertions.Template.from_stack(stack)
+    roles = template.find_resources("AWS::IAM::Role")
+    deploy_role_ids = [
+        logical_id
+        for logical_id, props in roles.items()
+        if props["Properties"].get("RoleName")
+        in ("Contricool-CI-Dev-Deploy", "Contricool-CI-Prod-Deploy")
+    ]
+    assert len(deploy_role_ids) == 2, "Expected dev + prod deploy roles"
+
+    policies = template.find_resources("AWS::IAM::Policy")
+    for role_id in deploy_role_ids:
+        # Find the inline policy attached to this role.
+        attached = [
+            props
+            for props in policies.values()
+            if any(
+                isinstance(r, dict) and r.get("Ref") == role_id
+                for r in props["Properties"].get("Roles", [])
+            )
+        ]
+        assert attached, f"No inline policy attached to {role_id}"
+
+        # Aggregate every statement across attached policies.
+        deny_statements: list[dict[str, object]] = []
+        for props in attached:
+            for stmt in props["Properties"]["PolicyDocument"]["Statement"]:
+                if stmt.get("Effect") == "Deny":
+                    deny_statements.append(stmt)
+
+        # Some statement must Deny PutParameter on the pii-salt path.
+        salt_denies = [
+            s
+            for s in deny_statements
+            if "ssm:PutParameter" in (
+                s["Action"] if isinstance(s["Action"], list) else [s["Action"]]
+            )
+            and "pii-salt" in json.dumps(s.get("Resource", ""))
+        ]
+        assert salt_denies, (
+            f"Role {role_id}: no Deny on ssm:PutParameter for "
+            "/contricool/*/pii-salt. Without this, the wildcard "
+            "PutParameter Allow on /contricool/* could overwrite the salt."
+        )
+        # And DeleteParameter, for symmetry.
+        salt_delete_denies = [
+            s
+            for s in deny_statements
+            if "ssm:DeleteParameter" in (
+                s["Action"] if isinstance(s["Action"], list) else [s["Action"]]
+            )
+            and "pii-salt" in json.dumps(s.get("Resource", ""))
+        ]
+        assert salt_delete_denies, (
+            f"Role {role_id}: no Deny on ssm:DeleteParameter for the salt path."
+        )
 
 
 def test_deploy_role_trust_patterns_match_workflow_environment_keys(
@@ -399,6 +480,338 @@ def test_monitoring_stack_dev_no_dashboard(cdk_env: cdk.Environment) -> None:
     template.resource_count_is("AWS::CloudWatch::Dashboard", 0)
     # Two alarms wired (lambda-errors, apigw-5xx).
     template.resource_count_is("AWS::CloudWatch::Alarm", 2)
+
+
+def _auth_stack(env_name: str, cdk_env: cdk.Environment) -> assertions.Template:
+    app = cdk.App()
+    stack = AuthStack(
+        app,
+        f"Contricool-{env_name.capitalize()}-Auth",
+        env=cdk_env,
+        env_name=env_name,
+        prod_cmk_arn=(
+            f"arn:aws:kms:us-west-2:111111111111:key/{'p' * 32}"
+            if env_name == "prod"
+            else None
+        ),
+    )
+    return assertions.Template.from_stack(stack)
+
+
+def _data_stack(env_name: str, cdk_env: cdk.Environment) -> assertions.Template:
+    import aws_cdk as cdk_mod
+    from aws_cdk import aws_kms as kms
+
+    app = cdk_mod.App()
+    fake_cmk_stack = cdk_mod.Stack(app, "FakeCmkScope", env=cdk_env)
+    cmk = (
+        kms.Key.from_key_arn(
+            fake_cmk_stack,
+            "FakeCmk",
+            f"arn:aws:kms:us-west-2:111111111111:key/{'p' * 32}",
+        )
+        if env_name == "prod"
+        else None
+    )
+    stack = DataStack(
+        app,
+        f"Contricool-{env_name.capitalize()}-Data",
+        env=cdk_env,
+        env_name=env_name,
+        prod_cmk=cmk,
+    )
+    return assertions.Template.from_stack(stack)
+
+
+def test_auth_stack_user_pool_email_only_no_sms_no_mfa(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Pool must verify email (only), be MfaConfiguration=OFF, and carry NO
+    SmsConfiguration / SnsCallerArn (Design 4 + CONSTRAINTS.md §4)."""
+    template = _auth_stack("dev", cdk_env)
+    pools = template.find_resources("AWS::Cognito::UserPool")
+    assert len(pools) == 1
+    props = next(iter(pools.values()))["Properties"]
+    assert props["MfaConfiguration"] == "OFF"
+    assert props["AutoVerifiedAttributes"] == ["email"]
+    assert "SmsConfiguration" not in props
+    assert "SmsAuthenticationMessage" not in props
+    # Username attribute is email; sign-in is email-based.
+    assert "email" in props["UsernameAttributes"]
+
+
+def test_auth_stack_password_policy_meets_design_4(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Min 10, all four classes required, history 3."""
+    template = _auth_stack("dev", cdk_env)
+    pool_props = next(iter(template.find_resources("AWS::Cognito::UserPool").values()))[
+        "Properties"
+    ]
+    policy = pool_props["Policies"]["PasswordPolicy"]
+    assert policy["MinimumLength"] == 10
+    assert policy["RequireLowercase"] is True
+    assert policy["RequireUppercase"] is True
+    assert policy["RequireNumbers"] is True
+    assert policy["RequireSymbols"] is True
+    assert policy["PasswordHistorySize"] == 3
+
+
+def test_auth_stack_custom_user_id_attribute(cdk_env: cdk.Environment) -> None:
+    """Exactly one custom attribute: ``user_id`` (ULID, len 26, immutable)."""
+    template = _auth_stack("dev", cdk_env)
+    pool_props = next(iter(template.find_resources("AWS::Cognito::UserPool").values()))[
+        "Properties"
+    ]
+    schema = pool_props["Schema"]
+    custom = [s for s in schema if s["Name"].startswith("user_id") or s.get("Name") == "user_id"]
+    # Cognito reports custom attrs with their bare Name (no "custom:" prefix in schema).
+    assert len(custom) == 1, f"Expected one custom attribute; got {custom!r}"
+    cu = custom[0]
+    assert cu["AttributeDataType"] == "String"
+    assert cu.get("Mutable") in (False, None) or cu["Mutable"] is False
+    constraints = cu.get("StringAttributeConstraints", {})
+    assert constraints.get("MinLength") == "26"
+    assert constraints.get("MaxLength") == "26"
+
+
+def test_auth_stack_three_clients_no_secret_with_srp_only(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Three app clients (web/ios/android), all public (no secret), with
+    USER_SRP_AUTH + REFRESH_TOKEN_AUTH only."""
+    template = _auth_stack("dev", cdk_env)
+    clients = template.find_resources("AWS::Cognito::UserPoolClient")
+    assert len(clients) == 3
+    names = {c["Properties"]["ClientName"] for c in clients.values()}
+    assert names == {"web", "ios", "android"}
+    for c in clients.values():
+        props = c["Properties"]
+        assert props.get("GenerateSecret") in (False, None)
+        flows = set(props.get("ExplicitAuthFlows", []))
+        # CDK expands user_srp=True into ALLOW_USER_SRP_AUTH +
+        # ALLOW_REFRESH_TOKEN_AUTH plus CDK's framework helpers
+        # (ALLOW_REFRESH_TOKEN_AUTH always); we assert the SRP flow is on
+        # and the password-grant flows are off.
+        assert "ALLOW_USER_SRP_AUTH" in flows
+        assert "ALLOW_REFRESH_TOKEN_AUTH" in flows
+        # Password-grant + admin flows MUST NOT be enabled — they bypass SRP.
+        forbidden = {
+            "ALLOW_USER_PASSWORD_AUTH",
+            "ALLOW_ADMIN_USER_PASSWORD_AUTH",
+        }
+        assert not (flows & forbidden), (
+            f"Client {props['ClientName']} has forbidden flows: {flows & forbidden!r}"
+        )
+
+
+def test_auth_stack_clients_have_no_oauth_flows(
+    cdk_env: cdk.Environment,
+) -> None:
+    """``AllowedOAuthFlows`` must be empty on every client. CDK's default
+    when ``o_auth=`` is omitted is to enable ``code`` + ``implicit`` with
+    a placeholder callback URL — not what we want at MVP (federation
+    deferred). Asserting here catches the regression where someone
+    deletes the explicit ``OAuthSettings`` block."""
+    template = _auth_stack("dev", cdk_env)
+    clients = template.find_resources("AWS::Cognito::UserPoolClient")
+    for c in clients.values():
+        props = c["Properties"]
+        flows = props.get("AllowedOAuthFlows") or []
+        assert not flows, (
+            f"Client {props['ClientName']} has OAuth flows enabled: {flows!r}; "
+            "MVP requires AllowedOAuthFlows be empty."
+        )
+        # AllowedOAuthFlowsUserPoolClient must be False/missing — when True it
+        # opts the client into the OAuth flows above.
+        assert props.get("AllowedOAuthFlowsUserPoolClient") in (False, None)
+        # Callback / logout URLs must be absent — they have no purpose without
+        # OAuth flows.
+        assert not props.get("CallbackURLs"), (
+            f"Client {props['ClientName']} has CallbackURLs set; "
+            "remove with OAuth flows."
+        )
+        assert not props.get("LogoutURLs"), (
+            f"Client {props['ClientName']} has LogoutURLs set; "
+            "remove with OAuth flows."
+        )
+
+
+def test_auth_stack_token_lifetimes_match_design_4(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Access + ID token = 1h, refresh = 30d (Design 4).
+
+    CDK normalises `Duration.hours(1)` to whichever Cognito-supported unit
+    fits; we assert in seconds rather than couple to the chosen unit so a
+    future CDK rev that picks ``hours`` doesn't break this test.
+    """
+    template = _auth_stack("dev", cdk_env)
+    clients = template.find_resources("AWS::Cognito::UserPoolClient")
+    unit_to_seconds = {
+        "seconds": 1,
+        "minutes": 60,
+        "hours": 60 * 60,
+        "days": 24 * 60 * 60,
+    }
+    for c in clients.values():
+        props = c["Properties"]
+        units = props.get("TokenValidityUnits", {})
+
+        access_seconds = props["AccessTokenValidity"] * unit_to_seconds[units["AccessToken"]]
+        id_seconds = props["IdTokenValidity"] * unit_to_seconds[units["IdToken"]]
+        refresh_seconds = (
+            props["RefreshTokenValidity"] * unit_to_seconds[units["RefreshToken"]]
+        )
+
+        assert access_seconds == 60 * 60, f"access != 1h: {access_seconds}s"
+        assert id_seconds == 60 * 60, f"id != 1h: {id_seconds}s"
+        assert refresh_seconds == 30 * 24 * 60 * 60, (
+            f"refresh != 30d: {refresh_seconds}s"
+        )
+
+        assert props.get("EnableTokenRevocation") is True
+        assert props.get("PreventUserExistenceErrors") == "ENABLED"
+
+
+def test_auth_stack_pii_salt_provider_kms_in_prod_only(
+    cdk_env: cdk.Environment,
+) -> None:
+    """The PII-salt provider Lambda's IAM policy carries the prod CMK in
+    prod and not in dev. Salt parameter path is /contricool/<env>/pii-salt."""
+    import json
+
+    dev_template = _auth_stack("dev", cdk_env)
+    prod_template = _auth_stack("prod", cdk_env)
+
+    def _policies_text(template: assertions.Template) -> str:
+        policies = template.find_resources("AWS::IAM::Policy")
+        return json.dumps(list(policies.values()))
+
+    dev_blob = _policies_text(dev_template)
+    prod_blob = _policies_text(prod_template)
+
+    assert "/contricool/dev/pii-salt" in dev_blob
+    assert "/contricool/prod/pii-salt" in prod_blob
+
+    # CMK actions only appear in prod.
+    assert "kms:Encrypt" in prod_blob
+    assert "kms:Encrypt" not in dev_blob
+
+    # No DeleteParameter in either env (salt is permanent).
+    assert "ssm:DeleteParameter" not in dev_blob
+    assert "ssm:DeleteParameter" not in prod_blob
+
+
+def test_auth_stack_user_pool_retention_in_prod_destroy_in_dev(
+    cdk_env: cdk.Environment,
+) -> None:
+    dev_template = _auth_stack("dev", cdk_env)
+    prod_template = _auth_stack("prod", cdk_env)
+    dev_pool = next(iter(dev_template.find_resources("AWS::Cognito::UserPool").values()))
+    prod_pool = next(
+        iter(prod_template.find_resources("AWS::Cognito::UserPool").values())
+    )
+    assert dev_pool.get("DeletionPolicy") == "Delete"
+    assert prod_pool.get("DeletionPolicy") == "Retain"
+    # Prod also has DeletionProtection=ACTIVE.
+    assert prod_pool["Properties"].get("DeletionProtection") == "ACTIVE"
+    assert dev_pool["Properties"].get("DeletionProtection") in (None, "INACTIVE")
+
+
+def test_auth_stack_account_recovery_email_only(cdk_env: cdk.Environment) -> None:
+    template = _auth_stack("dev", cdk_env)
+    pool_props = next(iter(template.find_resources("AWS::Cognito::UserPool").values()))[
+        "Properties"
+    ]
+    recovery = pool_props["AccountRecoverySetting"]["RecoveryMechanisms"]
+    names = {r["Name"] for r in recovery}
+    assert names == {"verified_email"}, (
+        f"Account recovery must be email-only; got {names!r}"
+    )
+
+
+def test_data_stack_table_keys_billing_ttl(cdk_env: cdk.Environment) -> None:
+    template = _data_stack("dev", cdk_env)
+    tables = template.find_resources("AWS::DynamoDB::Table")
+    assert len(tables) == 1
+    props = next(iter(tables.values()))["Properties"]
+    assert props["TableName"] == "ContriCool-Users-dev"
+    assert props["BillingMode"] == "PAY_PER_REQUEST"
+    keys = {k["AttributeName"]: k["KeyType"] for k in props["KeySchema"]}
+    assert keys == {"PK": "HASH", "SK": "RANGE"}
+    attrs = {a["AttributeName"]: a["AttributeType"] for a in props["AttributeDefinitions"]}
+    assert attrs == {
+        "PK": "S",
+        "SK": "S",
+        "GSI1PK": "S",
+        "GSI1SK": "S",
+    }
+    ttl = props["TimeToLiveSpecification"]
+    assert ttl["AttributeName"] == "ttl"
+    assert ttl["Enabled"] is True
+
+
+def test_data_stack_gsi1_keys_and_projection_all(cdk_env: cdk.Environment) -> None:
+    template = _data_stack("dev", cdk_env)
+    props = next(iter(template.find_resources("AWS::DynamoDB::Table").values()))[
+        "Properties"
+    ]
+    gsis = props["GlobalSecondaryIndexes"]
+    assert len(gsis) == 1
+    gsi1 = gsis[0]
+    assert gsi1["IndexName"] == "GSI1"
+    assert {k["AttributeName"]: k["KeyType"] for k in gsi1["KeySchema"]} == {
+        "GSI1PK": "HASH",
+        "GSI1SK": "RANGE",
+    }
+    assert gsi1["Projection"]["ProjectionType"] == "ALL"
+
+
+def test_data_stack_pitr_streams_only_in_prod(cdk_env: cdk.Environment) -> None:
+    dev = next(iter(_data_stack("dev", cdk_env).find_resources("AWS::DynamoDB::Table").values()))[
+        "Properties"
+    ]
+    prod = next(iter(_data_stack("prod", cdk_env).find_resources("AWS::DynamoDB::Table").values()))[
+        "Properties"
+    ]
+    # Dev: PITR off, no Stream.
+    assert dev.get("PointInTimeRecoverySpecification", {}).get(
+        "PointInTimeRecoveryEnabled"
+    ) in (False, None)
+    assert "StreamSpecification" not in dev
+    # Prod: PITR on, Stream NEW_AND_OLD_IMAGES.
+    assert prod["PointInTimeRecoverySpecification"]["PointInTimeRecoveryEnabled"] is True
+    assert prod["StreamSpecification"]["StreamViewType"] == "NEW_AND_OLD_IMAGES"
+
+
+def test_data_stack_kms_cmk_in_prod_default_in_dev(cdk_env: cdk.Environment) -> None:
+    dev = next(iter(_data_stack("dev", cdk_env).find_resources("AWS::DynamoDB::Table").values()))[
+        "Properties"
+    ]
+    prod = next(iter(_data_stack("prod", cdk_env).find_resources("AWS::DynamoDB::Table").values()))[
+        "Properties"
+    ]
+    # Dev uses AWS-managed key — SSESpecification absent or KMSMasterKeyId
+    # empty (CDK emits no SSESpecification for the default AWS-managed
+    # path).
+    dev_sse = dev.get("SSESpecification", {})
+    assert dev_sse.get("KMSMasterKeyId") in (None, "")
+    # Prod uses CMK reference (string).
+    prod_sse = prod["SSESpecification"]
+    assert prod_sse["SSEEnabled"] is True
+    assert prod_sse["SSEType"] == "KMS"
+    assert prod_sse["KMSMasterKeyId"] is not None
+
+
+def test_data_stack_users_table_retention_in_prod_destroy_in_dev(
+    cdk_env: cdk.Environment,
+) -> None:
+    dev = next(iter(_data_stack("dev", cdk_env).find_resources("AWS::DynamoDB::Table").values()))
+    prod = next(iter(_data_stack("prod", cdk_env).find_resources("AWS::DynamoDB::Table").values()))
+    assert dev.get("DeletionPolicy") == "Delete"
+    assert prod.get("DeletionPolicy") == "Retain"
+    assert prod["Properties"].get("DeletionProtectionEnabled") is True
 
 
 def test_monitoring_stack_prod_has_dashboard(cdk_env: cdk.Environment) -> None:

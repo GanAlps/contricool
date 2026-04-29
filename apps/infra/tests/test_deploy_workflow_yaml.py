@@ -292,6 +292,50 @@ def _collect_run_blocks(workflow: dict[str, object]) -> list[tuple[str, str]]:
     return blocks
 
 
+def test_deploy_yaml_writes_cognito_and_ddb_ids_to_ssm(
+    deploy_workflow: dict[str, object],
+) -> None:
+    """Each deploy job must publish the five IDs (4 Cognito + 1 DDB) to SSM
+    so the API Lambda can pick them up at cold start. Salt is owned by the
+    AuthStack custom resource and MUST NOT be touched by the workflow."""
+    blocks = _collect_run_blocks(deploy_workflow)
+    by_job: dict[str, str] = {}
+    for job_id, run in blocks:
+        by_job.setdefault(job_id, "")
+        by_job[job_id] += run + "\n"
+
+    expected_paths = {
+        "deploy-dev": [
+            "/contricool/dev/cognito/user-pool-id",
+            "/contricool/dev/cognito/client-id-web",
+            "/contricool/dev/cognito/client-id-ios",
+            "/contricool/dev/cognito/client-id-android",
+            "/contricool/dev/ddb/users-table-name",
+        ],
+        "deploy-prod": [
+            "/contricool/prod/cognito/user-pool-id",
+            "/contricool/prod/cognito/client-id-web",
+            "/contricool/prod/cognito/client-id-ios",
+            "/contricool/prod/cognito/client-id-android",
+            "/contricool/prod/ddb/users-table-name",
+        ],
+    }
+    for job_id, paths in expected_paths.items():
+        assert job_id in by_job, f"deploy.yml missing job {job_id}"
+        for path in paths:
+            assert path in by_job[job_id], (
+                f"{job_id} must put_string {path} after cdk deploy"
+            )
+
+    # Defense-in-depth red-line check: workflow must NEVER write the salt.
+    for job_id, blob in by_job.items():
+        assert "pii-salt" not in blob, (
+            f"deploy.yml {job_id} contains 'pii-salt' — the salt is owned by "
+            f"the AuthStack custom resource and must NEVER be written by the "
+            f"workflow (rotation breaks every email lookup row)."
+        )
+
+
 def test_deploy_yaml_run_blocks_use_strict_bash(
     deploy_workflow: dict[str, object],
 ) -> None:

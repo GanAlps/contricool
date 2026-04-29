@@ -165,6 +165,8 @@ contricool/
       tailwind.config.ts
     infra/                # AWS CDK (Python)
       stacks/{shared,data,auth,api,web,edge,monitoring}_stack.py
+      cdk_constructs/     # custom CDK constructs (PiiSalt, ...)
+      aspects/            # synth-time enforcement aspects
       app.py
   packages/
     openapi/openapi.yaml      # generated artifact, committed
