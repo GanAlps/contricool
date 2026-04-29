@@ -301,29 +301,23 @@ def query_one_side(
     """
     sk_floor = f"FRIEND#{last_friend_id}" if last_friend_id else "FRIEND#"
     op = ">" if last_friend_id else ">="
+    values = {":pk": f"USER#{user_id}", ":sk": sk_floor}
+    table = _table()
     if side == "base":
-        kwargs = {
-            "KeyConditionExpression": f"PK = :pk AND SK {op} :sk",
-            "ExpressionAttributeValues": {
-                ":pk": f"USER#{user_id}",
-                ":sk": sk_floor,
-            },
-            "Limit": fetch_limit,
-        }
+        response = table.query(
+            KeyConditionExpression=f"PK = :pk AND SK {op} :sk",
+            ExpressionAttributeValues=values,
+            Limit=fetch_limit,
+        )
     elif side == "gsi1":
-        kwargs = {
-            "IndexName": _GSI1,
-            "KeyConditionExpression": f"GSI1PK = :pk AND GSI1SK {op} :sk",
-            "ExpressionAttributeValues": {
-                ":pk": f"USER#{user_id}",
-                ":sk": sk_floor,
-            },
-            "Limit": fetch_limit,
-        }
+        response = table.query(
+            IndexName=_GSI1,
+            KeyConditionExpression=f"GSI1PK = :pk AND GSI1SK {op} :sk",
+            ExpressionAttributeValues=values,
+            Limit=fetch_limit,
+        )
     else:
         raise ValueError(f"unknown side {side!r}")
-
-    response = _table().query(**kwargs)
     rows: list[FriendRow] = []
     for item in response.get("Items") or []:
         # The friend's user_id lives in different attributes depending
