@@ -25,8 +25,12 @@ export type AuthMiddlewareOptions = {
 };
 
 const RETRY_FLAG = Symbol.for('contricool.no-retry');
+const REPLAY_BODY = Symbol.for('contricool.replay-body');
 
-type FlaggedRequest = Request & { [RETRY_FLAG]?: true };
+type FlaggedRequest = Request & {
+  [RETRY_FLAG]?: true;
+  [REPLAY_BODY]?: string | null;
+};
 
 function isAuthBootstrapPath(pathname: string): boolean {
   // Match `/v1/auth/...`, `/auth/...`, etc — everything in the auth
@@ -52,12 +56,32 @@ function defaultRefreshUrl(originalUrl: string): string {
 
 export function authMiddleware(opts: AuthMiddlewareOptions): Middleware {
   return {
-    onRequest({ request }: MiddlewareCallbackParams): Request {
+    async onRequest({ request }: MiddlewareCallbackParams): Promise<Request> {
       const url = new URL(request.url);
       if (!isAuthBootstrapPath(url.pathname)) {
         const t = opts.getAccessToken();
         if (t) {
           request.headers.set('authorization', `Bearer ${t}`);
+        }
+      }
+      // Phase 2e — capture the body BEFORE openapi-fetch consumes the
+      // request stream.  The 401-retry path below has to send the same
+      // body again, but `new Request(consumedRequest, ...)` produces a
+      // body-less Request because the stream is already drained.
+      // Methods that never carry a body (GET / HEAD / OPTIONS) skip
+      // this so we don't pay the clone cost.
+      const method = request.method.toUpperCase();
+      const flagged = request as FlaggedRequest;
+      if (
+        method !== 'GET' &&
+        method !== 'HEAD' &&
+        method !== 'OPTIONS' &&
+        flagged[REPLAY_BODY] === undefined
+      ) {
+        try {
+          flagged[REPLAY_BODY] = await request.clone().text();
+        } catch {
+          flagged[REPLAY_BODY] = null;
         }
       }
       return request;
@@ -97,10 +121,22 @@ export function authMiddleware(opts: AuthMiddlewareOptions): Middleware {
 
         if (refreshOk && tokens) {
           opts.onTokenRefreshed?.(tokens);
-          const replay = new Request(request, {
-            headers: new Headers(request.headers),
+          // Build a fresh Request from primitives — the original's body
+          // stream is already consumed by openapi-fetch's first send,
+          // so `new Request(request, ...)` would produce body: null
+          // for any POST/PUT/PATCH.  The captured body string from
+          // onRequest is what we re-attach.
+          const flaggedReq = request as FlaggedRequest;
+          const replayHeaders = new Headers(request.headers);
+          replayHeaders.set('authorization', `Bearer ${tokens.access_token}`);
+          const method = request.method.toUpperCase();
+          const carriesBody = method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS';
+          const replay = new Request(request.url, {
+            method: request.method,
+            headers: replayHeaders,
+            body: carriesBody ? (flaggedReq[REPLAY_BODY] ?? null) : null,
+            credentials: 'include',
           });
-          replay.headers.set('authorization', `Bearer ${tokens.access_token}`);
           (replay as FlaggedRequest)[RETRY_FLAG] = true;
           return fetch(replay);
         }

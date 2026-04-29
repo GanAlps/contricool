@@ -268,12 +268,15 @@ class ApiStack(Stack):
         # Phase 2e: cookie-based refresh requires `allow_credentials=true`
         # which the CORS spec forbids alongside `*` origin.  We list:
         #
-        # 1. The deployed CloudFront origin (read from SSM, written by the
-        #    deploy workflow's "Write CloudFront domain to SSM" step). On
-        #    a brand-new env where the SSM param is missing the lookup
-        #    falls back to a placeholder that won't match any real origin
-        #    — local-dev URLs still work, and the next deploy after the
-        #    SSM is populated picks up the prod origin.
+        # 1. The deployed CloudFront origin via SSM Dynamic Reference
+        #    (`{{resolve:ssm:/contricool/<env>/cloudfront-domain}}`).
+        #    CloudFormation resolves this at stack-update time, so the
+        #    parameter MUST exist before `cdk deploy` runs.  The deploy
+        #    workflow's "Pre-seed cloudfront-domain SSM" step ensures
+        #    this on first deploy by writing the placeholder
+        #    `placeholder.invalid`; subsequent deploys overwrite it
+        #    with the live CloudFront domain (via the "Write CloudFront
+        #    domain to SSM" step that runs *after* a successful deploy).
         # 2. Localhost origins for `pnpm --filter @contricool/client dev:web`
         #    so a developer running the SPA locally against the deployed
         #    dev API can sign in / refresh.

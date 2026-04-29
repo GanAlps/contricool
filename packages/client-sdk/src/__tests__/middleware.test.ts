@@ -34,24 +34,36 @@ afterEach(() => {
 });
 
 describe('authMiddleware.onRequest', () => {
-  it('attaches Authorization on non-/auth/ paths when a token is available', () => {
+  it('attaches Authorization on non-/auth/ paths when a token is available', async () => {
     const mw = makeMw({ getAccessToken: () => 'tok-1' });
     const req = new Request('http://localhost/v1/me', { method: 'GET' });
-    const out = mw.onRequest!({ request: req, schemaPath: '', params: {} } as never) as Request;
+    const out = (await mw.onRequest!({
+      request: req,
+      schemaPath: '',
+      params: {},
+    } as never)) as Request;
     expect(out.headers.get('authorization')).toBe('Bearer tok-1');
   });
 
-  it('skips Authorization on /auth/* paths even when a token is available', () => {
+  it('skips Authorization on /auth/* paths even when a token is available', async () => {
     const mw = makeMw({ getAccessToken: () => 'tok-1' });
     const req = new Request('http://localhost/v1/auth/login', { method: 'POST' });
-    const out = mw.onRequest!({ request: req, schemaPath: '', params: {} } as never) as Request;
+    const out = (await mw.onRequest!({
+      request: req,
+      schemaPath: '',
+      params: {},
+    } as never)) as Request;
     expect(out.headers.get('authorization')).toBeNull();
   });
 
-  it('skips Authorization when no token is available', () => {
+  it('skips Authorization when no token is available', async () => {
     const mw = makeMw();
     const req = new Request('http://localhost/v1/me');
-    const out = mw.onRequest!({ request: req, schemaPath: '', params: {} } as never) as Request;
+    const out = (await mw.onRequest!({
+      request: req,
+      schemaPath: '',
+      params: {},
+    } as never)) as Request;
     expect(out.headers.get('authorization')).toBeNull();
   });
 });
@@ -97,6 +109,67 @@ describe('authMiddleware.onResponse', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(onUnauth).not.toHaveBeenCalled();
     expect(onRefreshed).not.toHaveBeenCalled();
+  });
+
+  it('handles a POST whose body clone throws (defensive REPLAY_BODY catch)', async () => {
+    const mw = makeMw({ getAccessToken: () => 't' });
+    const req = new Request('http://localhost/v1/transactions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"x":1}',
+    });
+    Object.defineProperty(req, 'clone', {
+      value: () => {
+        throw new Error('clone unavailable');
+      },
+    });
+    // Should not throw — the defensive catch sets the slot to null.
+    await mw.onRequest!({ request: req, schemaPath: '', params: {} } as never);
+    expect(req.headers.get('authorization')).toBe('Bearer t');
+  });
+
+  it('replays a POST 401 with the original body intact (B1 regression)', async () => {
+    const onRefreshed = vi.fn();
+    const mw = makeMw({
+      getAccessToken: () => 'old-token',
+      onTokenRefreshed: onRefreshed,
+    });
+    fetchMock.mockResolvedValueOnce(
+      jsonRes({ access_token: 'new-token', id_token: 'new-id', expires_in: 3600 }, 200),
+    );
+    fetchMock.mockResolvedValueOnce(jsonRes({ ok: true }, 200));
+    const originalBody = JSON.stringify({ note: 'lunch', amount: 12.5 });
+    // Real flow: openapi-fetch invokes onRequest before sending. We
+    // simulate the same lifecycle here so the body capture in onRequest
+    // happens, then the body is "consumed" by the simulated send, then
+    // onResponse's retry path uses the captured body.
+    const req = new Request('http://localhost/v1/transactions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer old-token' },
+      body: originalBody,
+    });
+    await mw.onRequest!({ request: req, schemaPath: '', params: {} } as never);
+    // Drain the original body to mimic the first failed send.
+    await req.text();
+    const res = jsonRes(
+      { error: { code: 'UNAUTHENTICATED', message: 'expired', request_id: 'r' } },
+      401,
+    );
+    const out = (await mw.onResponse!({
+      request: req,
+      response: res,
+      schemaPath: '',
+      params: {},
+    } as never)) as Response;
+    expect(out.status).toBe(200);
+    // Two fetches happened: refresh + replay.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const replayCall = fetchMock.mock.calls[1]?.[0] as Request;
+    const replayBody = await replayCall.text();
+    expect(replayBody).toBe(originalBody);
+    expect(replayCall.method).toBe('POST');
+    expect(replayCall.headers.get('authorization')).toBe('Bearer new-token');
+    expect(replayCall.headers.get('content-type')).toBe('application/json');
   });
 
   it('refresh succeeds → retries original with new bearer → returns retry response (N3)', async () => {

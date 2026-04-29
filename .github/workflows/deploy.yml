@@ -61,6 +61,28 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_DEV }}
           aws-region: ${{ vars.AWS_REGION }}
+      # Phase 2e: ApiStack reads /contricool/dev/cloudfront-domain via
+      # `ssm.StringParameter.value_for_string_parameter`, which is a CFN
+      # dynamic reference (`{{resolve:ssm:...}}`) resolved at stack-update
+      # time.  On a brand-new env the parameter doesn't exist yet, which
+      # causes CloudFormation to fail the stack.  Pre-seed with a
+      # placeholder value (idempotent — `--overwrite` is a no-op when
+      # the parameter already holds the real domain).
+      - name: Pre-seed cloudfront-domain SSM (idempotent placeholder)
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          existing="$(aws ssm get-parameter \
+            --name /contricool/dev/cloudfront-domain \
+            --query 'Parameter.Value' --output text 2>/dev/null || echo '')"
+          if [ -z "${existing}" ]; then
+            aws ssm put-parameter \
+              --name /contricool/dev/cloudfront-domain \
+              --value "placeholder.invalid" \
+              --type String \
+              --overwrite
+          fi
       - name: cdk deploy Contricool-Dev-*
         working-directory: apps/infra
         env:
@@ -237,6 +259,23 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_PROD }}
           aws-region: ${{ vars.AWS_REGION }}
+      # Phase 2e — same first-deploy SSM pre-seed as deploy-dev. See
+      # the dev step above for rationale.
+      - name: Pre-seed cloudfront-domain SSM (idempotent placeholder)
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          existing="$(aws ssm get-parameter \
+            --name /contricool/prod/cloudfront-domain \
+            --query 'Parameter.Value' --output text 2>/dev/null || echo '')"
+          if [ -z "${existing}" ]; then
+            aws ssm put-parameter \
+              --name /contricool/prod/cloudfront-domain \
+              --value "placeholder.invalid" \
+              --type String \
+              --overwrite
+          fi
       - name: cdk deploy Contricool-Prod-*
         working-directory: apps/infra
         env:
