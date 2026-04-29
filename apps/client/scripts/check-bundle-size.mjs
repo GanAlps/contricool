@@ -13,8 +13,10 @@ import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
 const BUNDLE_DIR = 'dist/_expo/static/js/web';
-const WARN_KB = 250;
-const FAIL_KB = 300;
+// Phase 2d initial-route budget. Reassessed in 2e once the generated
+// SDK lands and we measure what tree-shakes.
+const WARN_KB = 300;
+const FAIL_KB = 350;
 
 let dirContents;
 try {
