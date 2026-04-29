@@ -157,6 +157,16 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 
 **Why next**: every subsequent feature requires authenticated callers.
 
+**Sub-phase rollout** (each lands as its own PR, gated by `deploy.yml`):
+
+| Sub-phase | Scope | Spec |
+|---|---|---|
+| 2a | CDK Auth + Data stacks + PII salt SSM | `specs/phase-2a-cognito-ddb-foundation/` |
+| 2b | Backend `app/core/` (config, principal, observability, lookup_hash, JWT middleware) | TBD |
+| 2c | Backend `auth` feature (signup/verify/login/refresh/forgot/reset + rate-limit) | TBD |
+| 2d | Expo client foundation + auth screens | TBD |
+| 2e | OpenAPI + SDK regen + end-to-end wiring | TBD |
+
 ### 2a — Cognito infrastructure (CDK Auth stack)
 
 - [ ] `Contricool-<env>-Auth` stack: User Pool (`contricool-<env>`) with:

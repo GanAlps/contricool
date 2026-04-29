@@ -59,7 +59,7 @@ jobs:
         # CDK constructs use jsii-generated types that don't satisfy
         # mypy --strict cleanly; we run non-strict here and tighten as we
         # add our own modules.
-        run: mypy --no-strict-optional --ignore-missing-imports apps/infra/stacks apps/infra/aspects apps/infra/app.py
+        run: mypy --no-strict-optional --ignore-missing-imports apps/infra/stacks apps/infra/aspects apps/infra/app.py apps/infra/cdk_constructs
 
   test:
     name: test

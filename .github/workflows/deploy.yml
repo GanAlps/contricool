@@ -81,6 +81,45 @@ jobs:
             --value "${{ steps.outputs.outputs.cf_domain }}" \
             --type String \
             --overwrite
+      - name: Write dev Cognito + DDB IDs to SSM (idempotent)
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        # IDs flow:  CFN stack output → SSM Parameter → API Lambda cold start.
+        # NB: the PII salt is owned by the AuthStack custom resource; this
+        # step deliberately does NOT touch /contricool/dev/pii-salt.
+        run: |
+          set -euo pipefail
+          fetch_output() {
+            local stack="$1"
+            local key="$2"
+            aws cloudformation describe-stacks \
+              --stack-name "${stack}" \
+              --query "Stacks[0].Outputs[?OutputKey==\`${key}\`].OutputValue" \
+              --output text
+          }
+          put_string() {
+            local name="$1"
+            local value="$2"
+            if [ -z "${value}" ] || [ "${value}" = "None" ]; then
+              echo "::error::Empty SSM value for ${name}"
+              exit 1
+            fi
+            aws ssm put-parameter \
+              --name "${name}" \
+              --value "${value}" \
+              --type String \
+              --overwrite
+          }
+          user_pool_id="$(fetch_output Contricool-Dev-Auth UserPoolId)"
+          web_client_id="$(fetch_output Contricool-Dev-Auth WebClientId)"
+          ios_client_id="$(fetch_output Contricool-Dev-Auth IosClientId)"
+          android_client_id="$(fetch_output Contricool-Dev-Auth AndroidClientId)"
+          users_table_name="$(fetch_output Contricool-Dev-Data UsersTableName)"
+          put_string /contricool/dev/cognito/user-pool-id "${user_pool_id}"
+          put_string /contricool/dev/cognito/client-id-web "${web_client_id}"
+          put_string /contricool/dev/cognito/client-id-ios "${ios_client_id}"
+          put_string /contricool/dev/cognito/client-id-android "${android_client_id}"
+          put_string /contricool/dev/ddb/users-table-name "${users_table_name}"
 
   smoke-dev:
     name: smoke-dev
@@ -200,6 +239,44 @@ jobs:
             --value "${{ steps.outputs.outputs.cf_domain }}" \
             --type String \
             --overwrite
+      - name: Write prod Cognito + DDB IDs to SSM (idempotent)
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        # See deploy-dev counterpart for rationale. Salt is owned by the
+        # AuthStack custom resource and is never written here.
+        run: |
+          set -euo pipefail
+          fetch_output() {
+            local stack="$1"
+            local key="$2"
+            aws cloudformation describe-stacks \
+              --stack-name "${stack}" \
+              --query "Stacks[0].Outputs[?OutputKey==\`${key}\`].OutputValue" \
+              --output text
+          }
+          put_string() {
+            local name="$1"
+            local value="$2"
+            if [ -z "${value}" ] || [ "${value}" = "None" ]; then
+              echo "::error::Empty SSM value for ${name}"
+              exit 1
+            fi
+            aws ssm put-parameter \
+              --name "${name}" \
+              --value "${value}" \
+              --type String \
+              --overwrite
+          }
+          user_pool_id="$(fetch_output Contricool-Prod-Auth UserPoolId)"
+          web_client_id="$(fetch_output Contricool-Prod-Auth WebClientId)"
+          ios_client_id="$(fetch_output Contricool-Prod-Auth IosClientId)"
+          android_client_id="$(fetch_output Contricool-Prod-Auth AndroidClientId)"
+          users_table_name="$(fetch_output Contricool-Prod-Data UsersTableName)"
+          put_string /contricool/prod/cognito/user-pool-id "${user_pool_id}"
+          put_string /contricool/prod/cognito/client-id-web "${web_client_id}"
+          put_string /contricool/prod/cognito/client-id-ios "${ios_client_id}"
+          put_string /contricool/prod/cognito/client-id-android "${android_client_id}"
+          put_string /contricool/prod/ddb/users-table-name "${users_table_name}"
 
   smoke-prod:
     name: smoke-prod

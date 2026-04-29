@@ -157,3 +157,32 @@ def test_cdk_internal_lambdas_are_exempt_from_concurrency_check(cdk_outdir: Path
         "BucketDeployment + auto_delete_objects provider lambdas must be "
         f"exempt from the concurrency check; got: {concurrency_errors!r}"
     )
+
+
+def test_pii_salt_provider_lambda_passes_aspect(cdk_outdir: Path) -> None:
+    """The PII-salt construct creates two Lambdas:
+
+    1. The user-defined ``ProviderFn`` — we set ``reserved_concurrent_executions=1``
+       on it, so the Aspect rule is satisfied directly.
+    2. The CDK ``Provider`` framework Lambda (``framework-onEvent``) — already
+       on the SecurityAspect exemption list.
+
+    Both must pass without emitting ``ReservedConcurrentExecutions`` errors."""
+    from stacks.auth_stack import AuthStack
+
+    app = cdk.App(outdir=str(cdk_outdir))
+    AuthStack(
+        app,
+        "Contricool-Dev-Auth",
+        env=cdk.Environment(account="111111111111", region="us-west-2"),
+        env_name="dev",
+        prod_cmk_arn=None,
+    )
+    cdk.Aspects.of(app).add(SecurityAspect())
+
+    errors = _collect_errors(app)
+    concurrency_errors = [e for e in errors if "ReservedConcurrentExecutions" in e]
+    assert not concurrency_errors, (
+        "PII-salt provider Lambda must pass the concurrency Aspect "
+        f"(provider sets reserved=1, framework path is exempted); got: {concurrency_errors!r}"
+    )
