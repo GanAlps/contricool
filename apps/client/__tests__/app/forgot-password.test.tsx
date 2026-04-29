@@ -48,7 +48,7 @@ describe('ForgotPasswordScreen', () => {
 
   it('N9: RATE_LIMITED shows a toast and stays on the page', async () => {
     server.use(
-      http.post('/v1/auth/forgot-password', () =>
+      http.post('http://localhost/v1/auth/forgot-password', () =>
         HttpResponse.json(
           {
             error: {

@@ -71,7 +71,7 @@ describe('SignupScreen', () => {
   it('N4: confirm mismatch is caught client-side before any network call', async () => {
     let networkCalls = 0;
     server.use(
-      http.post('/v1/auth/signup', () => {
+      http.post('http://localhost/v1/auth/signup', () => {
         networkCalls++;
         return HttpResponse.json({ user_id: 'x', status: 'PENDING_VERIFICATION' }, { status: 202 });
       }),
@@ -91,7 +91,7 @@ describe('SignupScreen', () => {
 
   it('N5: EMAIL_EXISTS shows banner with login link', async () => {
     server.use(
-      http.post('/v1/auth/signup', () =>
+      http.post('http://localhost/v1/auth/signup', () =>
         HttpResponse.json(
           { error: { code: 'EMAIL_EXISTS', message: 'taken', request_id: 'r' } },
           { status: 409 },
@@ -114,7 +114,7 @@ describe('SignupScreen', () => {
 
   it('N6: INVALID_PASSWORD with details maps onto the password field', async () => {
     server.use(
-      http.post('/v1/auth/signup', () =>
+      http.post('http://localhost/v1/auth/signup', () =>
         HttpResponse.json(
           {
             error: {
@@ -142,7 +142,7 @@ describe('SignupScreen', () => {
 
   it('5xx surfaces a generic toast', async () => {
     server.use(
-      http.post('/v1/auth/signup', () =>
+      http.post('http://localhost/v1/auth/signup', () =>
         HttpResponse.json(
           { error: { code: 'INTERNAL', message: 'oops', request_id: 'r' } },
           { status: 500 },
@@ -164,7 +164,7 @@ describe('SignupScreen', () => {
   it('omits empty phone from the payload', async () => {
     let received: { phone?: string } = {};
     server.use(
-      http.post('/v1/auth/signup', async ({ request }) => {
+      http.post('http://localhost/v1/auth/signup', async ({ request }) => {
         received = (await request.json()) as { phone?: string };
         return HttpResponse.json({ user_id: 'x', status: 'PENDING_VERIFICATION' }, { status: 202 });
       }),

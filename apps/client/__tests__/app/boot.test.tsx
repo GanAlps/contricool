@@ -39,7 +39,7 @@ describe('Index redirect', () => {
   it('N14: hard-reload with valid cookie → refreshSession 200 → redirects to /dashboard', async () => {
     const tok = makeIdToken({ 'custom:user_id': 'u-1', name: 'Alice', 'custom:currency': 'USD' });
     server.use(
-      http.post('/v1/auth/refresh', () =>
+      http.post('http://localhost/v1/auth/refresh', () =>
         HttpResponse.json({ access_token: 'a', id_token: tok, expires_in: 3600 }),
       ),
     );
@@ -52,7 +52,7 @@ describe('Index redirect', () => {
 
   it('N13: hard-reload with no cookie → refresh 401 → redirects to /login', async () => {
     server.use(
-      http.post('/v1/auth/refresh', () =>
+      http.post('http://localhost/v1/auth/refresh', () =>
         HttpResponse.json(
           { error: { code: 'REFRESH_FAILED', message: 'x', request_id: 'r' } },
           { status: 401 },
@@ -70,7 +70,7 @@ describe('Index redirect', () => {
 
   it('N15: refresh network error → store empty → /login redirect', async () => {
     server.use(
-      http.post('/v1/auth/refresh', () =>
+      http.post('http://localhost/v1/auth/refresh', () =>
         HttpResponse.json(
           { error: { code: 'INTERNAL', message: 'x', request_id: 'r' } },
           { status: 500 },
@@ -88,7 +88,7 @@ describe('Index redirect', () => {
 describe('RootLayout boot probe', () => {
   it('runs refreshSession on mount and clears loading', async () => {
     server.use(
-      http.post('/v1/auth/refresh', () =>
+      http.post('http://localhost/v1/auth/refresh', () =>
         HttpResponse.json(
           { error: { code: 'REFRESH_FAILED', message: 'x', request_id: 'r' } },
           { status: 401 },

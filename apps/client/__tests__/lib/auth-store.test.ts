@@ -32,7 +32,7 @@ describe('useAuthStore', () => {
 
   it('signIn surfaces ApiErrorException on bad credentials', async () => {
     server.use(
-      http.post('/v1/auth/login', () =>
+      http.post('http://localhost/v1/auth/login', () =>
         HttpResponse.json(
           { error: { code: 'INVALID_CREDENTIALS', message: 'nope', request_id: 'r' } },
           { status: 401 },
@@ -59,7 +59,7 @@ describe('useAuthStore', () => {
 
   it('signOut clears state and re-throws when driver throws (N16)', async () => {
     server.use(
-      http.post('/v1/auth/logout', () =>
+      http.post('http://localhost/v1/auth/logout', () =>
         HttpResponse.json(
           { error: { code: 'INTERNAL', message: 'x', request_id: 'r' } },
           { status: 500 },
@@ -83,7 +83,7 @@ describe('useAuthStore', () => {
   it('refreshSession populates tokens + user on success (N14)', async () => {
     const tok = makeIdToken({ 'custom:user_id': 'u-1', name: 'Alice', 'custom:currency': 'USD' });
     server.use(
-      http.post('/v1/auth/refresh', () =>
+      http.post('http://localhost/v1/auth/refresh', () =>
         HttpResponse.json({ access_token: 'a-1', id_token: tok, expires_in: 3600 }),
       ),
     );
@@ -96,7 +96,7 @@ describe('useAuthStore', () => {
 
   it('refreshSession leaves store empty on failure (N13)', async () => {
     server.use(
-      http.post('/v1/auth/refresh', () =>
+      http.post('http://localhost/v1/auth/refresh', () =>
         HttpResponse.json(
           { error: { code: 'REFRESH_FAILED', message: 'x', request_id: 'r' } },
           { status: 401 },
@@ -127,7 +127,7 @@ describe('useAuthStore', () => {
     });
   });
 
-  it('apiFetch 401-retry uses store.accessToken as bearer', async () => {
+  it('SDK 401-retry replays with new bearer + writes new tokens to store', async () => {
     useAuthStore.setState({
       accessToken: 'old-tok',
       idToken: makeIdToken({ 'custom:user_id': 'u', name: 'A', 'custom:currency': 'USD' }),
@@ -136,7 +136,7 @@ describe('useAuthStore', () => {
     });
     const bearers: (string | null)[] = [];
     server.use(
-      http.get('/v1/protected', ({ request }) => {
+      http.get('http://localhost/v1/protected', ({ request }) => {
         bearers.push(request.headers.get('authorization'));
         const auth = request.headers.get('authorization');
         if (auth === 'Bearer new-tok') {
@@ -147,7 +147,7 @@ describe('useAuthStore', () => {
           { status: 401 },
         );
       }),
-      http.post('/v1/auth/refresh', () =>
+      http.post('http://localhost/v1/auth/refresh', () =>
         HttpResponse.json({
           access_token: 'new-tok',
           id_token: makeIdToken({ 'custom:user_id': 'u', name: 'A2', 'custom:currency': 'USD' }),
@@ -155,15 +155,18 @@ describe('useAuthStore', () => {
         }),
       ),
     );
-    const { apiFetch } = await import('~/lib/api');
-    const r = await apiFetch('/protected');
-    expect(r).toEqual({ ok: true });
+    const { apiClient } = await import('~/lib/api');
+    await (
+      apiClient as unknown as {
+        GET: (p: string) => Promise<{ data?: unknown }>;
+      }
+    ).GET('/protected');
     expect(useAuthStore.getState().accessToken).toBe('new-tok');
     expect(useAuthStore.getState().user?.name).toBe('A2');
     expect(bearers).toEqual(['Bearer old-tok', 'Bearer new-tok']);
   });
 
-  it('forceSignOut accessor clears the store', async () => {
+  it('SDK clears store when refresh-and-retry fails', async () => {
     useAuthStore.setState({
       user: { user_id: 'u', name: 'A', currency: 'USD' },
       accessToken: 't',
@@ -171,23 +174,27 @@ describe('useAuthStore', () => {
       loading: false,
     });
     server.use(
-      http.get('/v1/protected', () =>
+      http.get('http://localhost/v1/protected', () =>
         HttpResponse.json(
           { error: { code: 'UNAUTHENTICATED', message: 'x', request_id: 'r' } },
           { status: 401 },
         ),
       ),
-      http.post('/v1/auth/refresh', () =>
+      http.post('http://localhost/v1/auth/refresh', () =>
         HttpResponse.json(
           { error: { code: 'REFRESH_FAILED', message: 'x', request_id: 'r' } },
           { status: 401 },
         ),
       ),
     );
-    const { apiFetch } = await import('~/lib/api');
-    await expect(apiFetch('/protected')).rejects.toMatchObject({
-      error: { code: 'UNAUTHENTICATED' },
-    });
+    const { apiClient } = await import('~/lib/api');
+    await expect(
+      (
+        apiClient as unknown as {
+          GET: (p: string) => Promise<{ data?: unknown }>;
+        }
+      ).GET('/protected'),
+    ).rejects.toMatchObject({ error: { code: 'UNAUTHENTICATED' } });
     expect(useAuthStore.getState().user).toBeNull();
   });
 });

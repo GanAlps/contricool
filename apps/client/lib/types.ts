@@ -1,88 +1,52 @@
 /**
- * Backend contract types for Phase 2c's /v1/auth/* endpoints.
- * These mirror the Pydantic shapes in apps/api/app/features/auth/models.py
- * and will be replaced by the generated `@contricool/client-sdk` types
- * in Phase 2e.
+ * Phase 2e: re-export typed shapes from the generated SDK.  The
+ * Pydantic models in apps/api are the single source of truth; the
+ * SDK is a typed mirror of them.
+ *
+ * A few inputs (signup, verify-email, reset-password) need a small
+ * client-side rename because openapi-typescript emits the request-body
+ * type without a friendly name; we alias here to keep screens
+ * readable.
  */
 
-export type Currency = 'USD' | 'INR';
+import type {
+  AuthUser,
+  Currency,
+  ForgotPasswordResponse,
+  RefreshResponse,
+  ResendEmailCodeResponse,
+  ResetPasswordRequest,
+  ResetPasswordResponse,
+  SignInRequest,
+  SignInResponse,
+  SignupRequest,
+  SignupResponse,
+  VerifyEmailRequest,
+  VerifyEmailResponse,
+} from '@contricool/client-sdk';
 
-export type AuthUser = {
-  user_id: string;
-  name: string;
-  currency: Currency;
+export type {
+  AuthUser,
+  Currency,
+  ForgotPasswordResponse,
+  RefreshResponse,
+  ResendEmailCodeResponse,
+  ResetPasswordRequest,
+  ResetPasswordResponse,
+  SignInRequest,
+  SignupRequest,
+  SignupResponse,
+  VerifyEmailRequest,
+  VerifyEmailResponse,
 };
 
-export type SignupInput = {
-  email: string;
-  password: string;
-  name: string;
-  currency: Currency;
-  phone?: string;
-};
+// Renamed aliases for screen/driver readability.
+export type LoginInput = SignInRequest;
+export type LoginResponse = SignInResponse;
+export type SignupInput = SignupRequest;
+export type VerifyEmailInput = VerifyEmailRequest;
+export type ResetPasswordInput = ResetPasswordRequest;
 
-export type SignupResponse = {
-  user_id: string;
-  status: 'PENDING_VERIFICATION';
-};
-
-export type VerifyEmailInput = {
-  email: string;
-  code: string;
-};
-
-export type VerifyEmailResponse = {
-  email_verified: true;
-  account_active: true;
-};
-
-export type ResendEmailCodeResponse = {
-  status: 'RESENT';
-};
-
-export type LoginInput = {
-  email: string;
-  password: string;
-};
-
-export type LoginResponse = {
-  access_token: string;
-  id_token: string;
-  expires_in: number;
-  user: AuthUser;
-};
-
-export type RefreshResponse = {
-  access_token: string;
-  id_token: string;
-  expires_in: number;
-};
-
-export type ForgotPasswordResponse = {
-  status: 'RESET_CODE_SENT';
-};
-
-export type ResetPasswordInput = {
-  email: string;
-  code: string;
-  new_password: string;
-};
-
-export type ResetPasswordResponse = {
-  password_reset: true;
-};
-
-export type ApiErrorDetail = {
-  field: string;
-  issue: string;
-};
-
-export type ApiErrorEnvelope = {
-  error: {
-    code: string;
-    message: string;
-    request_id: string | null;
-    details?: ApiErrorDetail[];
-    retry_after?: number;
-  };
-};
+// Phase 2c envelope wrapper still re-exported from lib/api for callers
+// that need the type without importing the SDK.
+export type { ApiError, ApiErrorDetail } from '@contricool/client-sdk';

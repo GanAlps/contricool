@@ -22,6 +22,7 @@ export default defineConfig({
         // Type-only modules — no runtime to cover.
         'lib/types.ts',
         'lib/auth-driver.ts',
+        'lib/auth-driver-types.ts',
         // Used by app/_layout.tsx (Phase 5); tested via the layout integration.
         'lib/query-client.ts',
       ],

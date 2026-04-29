@@ -47,7 +47,7 @@ describe('storage negatives', () => {
 
   it('N22: hard reload after sign-out → store empty', async () => {
     server.use(
-      http.post('/v1/auth/refresh', () =>
+      http.post('http://localhost/v1/auth/refresh', () =>
         HttpResponse.json(
           { error: { code: 'REFRESH_FAILED', message: 'gone', request_id: 'r' } },
           { status: 401 },

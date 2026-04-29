@@ -17,6 +17,9 @@ importers:
       '@babel/runtime':
         specifier: ^7.29.2
         version: 7.29.2
+      '@contricool/client-sdk':
+        specifier: workspace:*
+        version: link:../../packages/client-sdk
       '@hookform/resolvers':
         specifier: ^3.9.1
         version: 3.10.0(react-hook-form@7.74.0(react@18.3.1))

@@ -50,7 +50,7 @@ describe('LoginScreen', () => {
 
   it('N1: wrong password → banner with INVALID_CREDENTIALS friendly copy', async () => {
     server.use(
-      http.post('/v1/auth/login', () =>
+      http.post('http://localhost/v1/auth/login', () =>
         HttpResponse.json(
           { error: { code: 'INVALID_CREDENTIALS', message: 'nope', request_id: 'r' } },
           { status: 401 },
@@ -65,7 +65,7 @@ describe('LoginScreen', () => {
 
   it('N2: ACCOUNT_NOT_ACTIVE shows banner with verify-email link', async () => {
     server.use(
-      http.post('/v1/auth/login', () =>
+      http.post('http://localhost/v1/auth/login', () =>
         HttpResponse.json(
           { error: { code: 'ACCOUNT_NOT_ACTIVE', message: 'pending', request_id: 'r' } },
           { status: 403 },
@@ -87,7 +87,7 @@ describe('LoginScreen', () => {
 
   it('N3: RATE_LIMITED shows a toast', async () => {
     server.use(
-      http.post('/v1/auth/login', () =>
+      http.post('http://localhost/v1/auth/login', () =>
         HttpResponse.json(
           {
             error: {

@@ -61,7 +61,7 @@ describe('ResetPasswordScreen', () => {
   it('N10: INVALID_CODE shows banner', async () => {
     setSearchParams({ email: 'a@b.com' });
     server.use(
-      http.post('/v1/auth/reset-password', () =>
+      http.post('http://localhost/v1/auth/reset-password', () =>
         HttpResponse.json(
           { error: { code: 'INVALID_CODE', message: 'wrong', request_id: 'r' } },
           { status: 401 },
@@ -79,7 +79,7 @@ describe('ResetPasswordScreen', () => {
   it('N11: INVALID_PASSWORD with details maps onto new_password field', async () => {
     setSearchParams({ email: 'a@b.com' });
     server.use(
-      http.post('/v1/auth/reset-password', () =>
+      http.post('http://localhost/v1/auth/reset-password', () =>
         HttpResponse.json(
           {
             error: {
@@ -104,7 +104,7 @@ describe('ResetPasswordScreen', () => {
   it('N12: confirm mismatch is caught client-side', async () => {
     let networkCalls = 0;
     server.use(
-      http.post('/v1/auth/reset-password', () => {
+      http.post('http://localhost/v1/auth/reset-password', () => {
         networkCalls++;
         return HttpResponse.json({ password_reset: true }, { status: 200 });
       }),
@@ -120,7 +120,7 @@ describe('ResetPasswordScreen', () => {
   it('5xx surfaces a generic toast', async () => {
     setSearchParams({ email: 'a@b.com' });
     server.use(
-      http.post('/v1/auth/reset-password', () =>
+      http.post('http://localhost/v1/auth/reset-password', () =>
         HttpResponse.json(
           { error: { code: 'INTERNAL', message: 'oops', request_id: 'r' } },
           { status: 500 },

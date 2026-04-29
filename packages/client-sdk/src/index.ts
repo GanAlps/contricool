@@ -27,6 +27,11 @@ export function createClient(opts: ClientOptions): ContricoolClient {
   const client = createOpenapiClient<paths>({
     baseUrl: opts.baseUrl,
     credentials: 'include',
+    // Dispatch dynamically so test runtimes (MSW, fetch-mock) that
+    // patch `globalThis.fetch` after module load are picked up.
+    // Without this wrapper, openapi-fetch captures the unpatched
+    // reference at createClient time.
+    fetch: (request) => globalThis.fetch(request),
   });
   client.use(authMiddleware(opts) as Middleware);
   return client;

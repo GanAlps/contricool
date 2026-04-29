@@ -1,19 +1,17 @@
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { setApiAuthAccessors } from '~/lib/api';
 import driver from '~/lib/auth-driver.web';
+import { useAuthStore } from '~/lib/auth-store';
 
 import { server } from '../msw-handlers';
 
 beforeEach(() => {
-  setApiAuthAccessors({
-    getAccessToken: () => null,
-    setTokensFromRefresh: () => {},
-    forceSignOut: () => {},
-  });
+  useAuthStore.getState()._clear();
 });
-afterEach(() => setApiAuthAccessors(null));
+afterEach(() => {
+  useAuthStore.getState()._clear();
+});
 
 describe('webAuthDriver', () => {
   it('signUp posts to /auth/signup and returns the response', async () => {
@@ -51,11 +49,7 @@ describe('webAuthDriver', () => {
   });
 
   it('signOut posts and resolves on 204', async () => {
-    setApiAuthAccessors({
-      getAccessToken: () => 'access-jwt',
-      setTokensFromRefresh: () => {},
-      forceSignOut: () => {},
-    });
+    useAuthStore.setState({ accessToken: 'access-jwt' });
     await expect(driver.signOut()).resolves.toBeUndefined();
   });
 
@@ -75,7 +69,7 @@ describe('webAuthDriver', () => {
 
   it('signUp surfaces a 409 EMAIL_EXISTS as ApiErrorException', async () => {
     server.use(
-      http.post('/v1/auth/signup', () =>
+      http.post('http://localhost/v1/auth/signup', () =>
         HttpResponse.json(
           { error: { code: 'EMAIL_EXISTS', message: 'taken', request_id: 'r1' } },
           { status: 409 },
