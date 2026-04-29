@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 
-const BASE = 'http://localhost/v1';
+const BASE = '/v1';
 
 type SignupBody = {
   email: string;
