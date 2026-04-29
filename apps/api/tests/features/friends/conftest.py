@@ -130,7 +130,13 @@ def seed_user(
     name: str,
     currency: str = "USD",
 ) -> None:
-    """Write a META row + the GSI1 EMAIL-projection so lookups hit."""
+    """Write a META row + the GSI1 EMAIL-projection so lookups hit.
+
+    The shape mirrors production exactly (auth.service._create_user_meta_row):
+    ``GSI1SK = "USER#<user_id>"``.  An earlier shape (``GSI1SK = "USER"``)
+    diverged from production and let a real lookup bug ship — see
+    fix/friends-email-lookup-gsi1sk.
+    """
     from app.core.lookup_hash import email_hash
     from app.features.friends.repository import now_iso
 
@@ -141,7 +147,7 @@ def seed_user(
             "PK": f"USER#{user_id}",
             "SK": "META",
             "GSI1PK": f"EMAIL#{email_hash(email)}",
-            "GSI1SK": "USER",
+            "GSI1SK": f"USER#{user_id}",
             "display_name": name,
             "currency": currency,
             "status": "active",
