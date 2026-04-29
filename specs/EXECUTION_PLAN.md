@@ -308,18 +308,18 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 
 | Sub-phase | Scope | Spec |
 |---|---|---|
-| 3a | Backend `friends` feature (repo, service, routes, rate-limit, error mapping, tests) | TBD — `specs/phase-3a-friends-backend/` |
-| 3b | Frontend friends UI (list, detail, add-friend modal) consuming the regenerated SDK | TBD — `specs/phase-3b-friends-client/` |
+| 3a ✅ | Backend `friends` feature — shipped via PR #28 (4 routes, 99.19% coverage) | `specs/phase-3a-friends-backend/` |
+| 3b ✅ | Frontend friends UI — shipped via PR #29 (4 screens, 169 tests, N1–N16) | `specs/phase-3b-friends-client/` |
 
 ### Tasks
 
-- [ ] **3a — Backend `friends` feature** (`apps/api/app/features/friends/`):
+- [x] **3a — Backend `friends` feature** (`apps/api/app/features/friends/`):
   - `repository.py` — canonical-pair friendship rows; **email-hash GSI1 lookup only** (phone is unverified-metadata-only at MVP per CONSTRAINTS.md).
   - `service.py` — add (with USER_NOT_FOUND, CONFLICT, success), list, remove. Per-user rate-limit on add (30/hour).
   - `routes.py` — `POST /v1/friends/add`, `GET /v1/friends`, `DELETE /v1/friends/{user_id}`, `GET /v1/friends/{user_id}/balance` (returns 0 net for now — no transactions yet).
   - `policy.py` updates in `app/core/`: `is_friend(a, b)` helper.
   - `make openapi` regenerates `packages/openapi/openapi.yaml` and SDK schema; CI drift gate.
-- [ ] **3b — Frontend friends UI** (`apps/client/app/(app)/friends/`):
+- [x] **3b — Frontend friends UI** (`apps/client/app/(app)/friends/`):
   - `index.tsx` — friend list page with empty state.
   - `[userId].tsx` — friend detail; balance shows 0.
   - "Add friend" sheet/modal triggered from friend list — email input, error handling for 404/409/422 (`INVALID_IDENTIFIER` if anything but email)/429.
