@@ -50,6 +50,7 @@ jobs:
           CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
           CDK_DEFAULT_REGION: ${{ vars.AWS_REGION }}
           CONTRICOOL_ALERTS_EMAIL: ${{ vars.CONTRICOOL_ALERTS_EMAIL }}
+          CONTRICOOL_APP_VERSION: ${{ github.sha }}
         run: |
           set -euo pipefail
           cdk deploy 'Contricool-Dev-*' \
@@ -191,6 +192,7 @@ jobs:
           CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
           CDK_DEFAULT_REGION: ${{ vars.AWS_REGION }}
           CONTRICOOL_ALERTS_EMAIL: ${{ vars.CONTRICOOL_ALERTS_EMAIL }}
+          CONTRICOOL_APP_VERSION: ${{ github.sha }}
         run: |
           set -euo pipefail
           cdk deploy 'Contricool-Prod-*' \

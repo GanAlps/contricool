@@ -358,6 +358,72 @@ def test_api_stack_synthesizes(cdk_env: cdk.Environment) -> None:
     )
 
 
+def test_api_stack_lambda_can_read_ssm_for_cold_start_config(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Phase 2b's ``app.core.config.load`` calls ``ssm:GetParameters`` at
+    cold start. Without an IAM grant the Lambda fails to start with
+    AccessDenied. Lock the grant + scope so a future refactor can't
+    drop it silently."""
+    import json
+
+    app = cdk.App()
+    stack = ApiStack(
+        app,
+        "Contricool-Dev-Api",
+        env=cdk_env,
+        env_name="dev",
+        snapstart=False,
+        log_retention_days=14,
+        xray_sampling_rate=1.0,
+    )
+    template = assertions.Template.from_stack(stack)
+    policies = template.find_resources("AWS::IAM::Policy")
+    blob = json.dumps(list(policies.values()))
+    assert "ssm:GetParameters" in blob, (
+        "ApiStack must grant ssm:GetParameters to the Lambda role"
+    )
+    assert "parameter/contricool/dev/" in blob, (
+        "SSM grant must be scoped to /contricool/<env>/* — "
+        "wildcard SSM read would let the function dump every parameter"
+    )
+
+
+def test_api_stack_prod_lambda_can_decrypt_pii_salt(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Prod's pii-salt is encrypted with the project CMK; the Lambda must
+    have ``kms:Decrypt`` to read the SecureString back. Dev uses
+    ``alias/aws/ssm`` so no explicit grant is needed there."""
+    import json
+
+    from aws_cdk import aws_kms as kms
+
+    app = cdk.App()
+    cmk_scope = cdk.Stack(app, "CmkScope", env=cdk_env)
+    cmk = kms.Key.from_key_arn(
+        cmk_scope,
+        "Cmk",
+        f"arn:aws:kms:us-west-2:111111111111:key/{'p' * 32}",
+    )
+    stack = ApiStack(
+        app,
+        "Contricool-Prod-Api",
+        env=cdk_env,
+        env_name="prod",
+        snapstart=False,
+        log_retention_days=14,
+        xray_sampling_rate=0.1,
+        prod_cmk=cmk,
+    )
+    template = assertions.Template.from_stack(stack)
+    policies = template.find_resources("AWS::IAM::Policy")
+    blob = json.dumps(list(policies.values()))
+    assert "kms:Decrypt" in blob, (
+        "Prod ApiStack must grant kms:Decrypt for the SecureString PII salt"
+    )
+
+
 def test_web_stack_synthesizes(cdk_env: cdk.Environment) -> None:
     app = cdk.App()
     api = ApiStack(
@@ -719,6 +785,38 @@ def test_auth_stack_user_pool_retention_in_prod_destroy_in_dev(
     assert dev_pool["Properties"].get("DeletionProtection") in (None, "INACTIVE")
 
 
+def test_auth_stack_email_config_matches_cognito_regex(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Cognito's API rejects ``ReplyToEmailAddress`` values that don't
+    match ``[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}]+@[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}]+``
+    — no spaces, no ``<>`` display-name wrapper. Lock the rule in synth
+    so any future ``with_cognito("Friendly <addr>")`` regresses here
+    rather than at CFN-create time on a real deploy."""
+    import re
+
+    template = _auth_stack("dev", cdk_env)
+    pool_props = next(iter(template.find_resources("AWS::Cognito::UserPool").values()))[
+        "Properties"
+    ]
+    email_config = pool_props.get("EmailConfiguration") or {}
+    reply_to = email_config.get("ReplyToEmailAddress")
+    if reply_to is not None:
+        # Equivalent of Cognito's regex (Python ``re`` does not natively
+        # support \\p{} character properties, so we approximate with the
+        # narrow subset of characters Cognito accepts that we care about).
+        assert re.fullmatch(r"[^\s<>]+@[^\s<>]+", reply_to), (
+            f"ReplyToEmailAddress {reply_to!r} would be rejected by "
+            f"Cognito's regex constraint."
+        )
+        # And specifically reject the 'Friendly <email>' shape.
+        assert "<" not in reply_to and ">" not in reply_to, (
+            "ReplyToEmailAddress must not carry a display-name wrapper. "
+            "The Cognito-managed sender's friendly From name is fixed by "
+            "AWS and cannot be overridden via the reply-to field."
+        )
+
+
 def test_auth_stack_account_recovery_email_only(cdk_env: cdk.Environment) -> None:
     template = _auth_stack("dev", cdk_env)
     pool_props = next(iter(template.find_resources("AWS::Cognito::UserPool").values()))[
@@ -815,7 +913,15 @@ def test_data_stack_users_table_retention_in_prod_destroy_in_dev(
 
 
 def test_monitoring_stack_prod_has_dashboard(cdk_env: cdk.Environment) -> None:
+    from aws_cdk import aws_kms as kms
+
     app = cdk.App()
+    cmk_scope = cdk.Stack(app, "MonitoringCmkScope", env=cdk_env)
+    cmk = kms.Key.from_key_arn(
+        cmk_scope,
+        "Cmk",
+        f"arn:aws:kms:us-west-2:111111111111:key/{'p' * 32}",
+    )
     api = ApiStack(
         app,
         "Contricool-Prod-Api",
@@ -824,6 +930,7 @@ def test_monitoring_stack_prod_has_dashboard(cdk_env: cdk.Environment) -> None:
         snapstart=True,
         log_retention_days=14,
         xray_sampling_rate=0.1,
+        prod_cmk=cmk,
     )
     mon = MonitoringStack(
         app,
