@@ -25,6 +25,55 @@ def cdk_env() -> cdk.Environment:
     return cdk.Environment(account="111111111111", region="us-west-2")
 
 
+def _api_stack_auth_data_kwargs(
+    app: cdk.App, cdk_env: cdk.Environment, *, env_name: str
+) -> dict[str, object]:
+    """Build the per-env Auth + Data stacks + return kwargs for ApiStack.
+
+    Phase 2c made ``user_pool``, ``web_client``, ``ios_client``,
+    ``android_client``, and ``users_table`` required parameters on
+    :class:`ApiStack`. Synth tests build the upstream stacks here so
+    they can inject real (unsynthesized) ``IUserPool`` / ``ITable``
+    handles.
+    """
+    from aws_cdk import aws_kms as kms
+
+    is_prod = env_name == "prod"
+    cmk_for_data = None
+    if is_prod:
+        cmk_scope = cdk.Stack(app, f"CmkScopeForApi-{env_name}", env=cdk_env)
+        cmk_for_data = kms.Key.from_key_arn(
+            cmk_scope,
+            "FakeCmk",
+            f"arn:aws:kms:us-west-2:111111111111:key/{'p' * 32}",
+        )
+    auth = AuthStack(
+        app,
+        f"AuthForApiTest-{env_name}",
+        env=cdk_env,
+        env_name=env_name,
+        prod_cmk_arn=(
+            f"arn:aws:kms:us-west-2:111111111111:key/{'p' * 32}"
+            if is_prod
+            else None
+        ),
+    )
+    data = DataStack(
+        app,
+        f"DataForApiTest-{env_name}",
+        env=cdk_env,
+        env_name=env_name,
+        prod_cmk=cmk_for_data,
+    )
+    return {
+        "user_pool": auth.user_pool,
+        "web_client": auth.web_client,
+        "ios_client": auth.ios_client,
+        "android_client": auth.android_client,
+        "users_table": data.users_table,
+    }
+
+
 def test_shared_stack_synthesizes(cdk_env: cdk.Environment) -> None:
     app = cdk.App()
     stack = SharedStack(
@@ -337,6 +386,7 @@ def test_api_stack_synthesizes(cdk_env: cdk.Environment) -> None:
         snapstart=True,
         log_retention_days=14,
         xray_sampling_rate=1.0,
+        **_api_stack_auth_data_kwargs(app, cdk_env, env_name="dev"),
     )
     template = assertions.Template.from_stack(stack)
     # Lambda has reserved concurrency = 100 (red-line 2).
@@ -376,6 +426,7 @@ def test_api_stack_lambda_can_read_ssm_for_cold_start_config(
         snapstart=False,
         log_retention_days=14,
         xray_sampling_rate=1.0,
+        **_api_stack_auth_data_kwargs(app, cdk_env, env_name="dev"),
     )
     template = assertions.Template.from_stack(stack)
     policies = template.find_resources("AWS::IAM::Policy")
@@ -415,6 +466,7 @@ def test_api_stack_prod_lambda_can_decrypt_pii_salt(
         log_retention_days=14,
         xray_sampling_rate=0.1,
         prod_cmk=cmk,
+        **_api_stack_auth_data_kwargs(app, cdk_env, env_name="prod"),
     )
     template = assertions.Template.from_stack(stack)
     policies = template.find_resources("AWS::IAM::Policy")
@@ -434,6 +486,7 @@ def test_web_stack_synthesizes(cdk_env: cdk.Environment) -> None:
         snapstart=True,
         log_retention_days=14,
         xray_sampling_rate=1.0,
+        **_api_stack_auth_data_kwargs(app, cdk_env, env_name="dev"),
     )
     stack = WebStack(
         app,
@@ -479,6 +532,7 @@ def test_web_stack_csp_goes_through_security_headers_not_custom_headers(
         snapstart=True,
         log_retention_days=14,
         xray_sampling_rate=1.0,
+        **_api_stack_auth_data_kwargs(app, cdk_env, env_name="dev"),
     )
     stack = WebStack(
         app,
@@ -531,6 +585,7 @@ def test_monitoring_stack_dev_no_dashboard(cdk_env: cdk.Environment) -> None:
         snapstart=True,
         log_retention_days=14,
         xray_sampling_rate=1.0,
+        **_api_stack_auth_data_kwargs(app, cdk_env, env_name="dev"),
     )
     mon = MonitoringStack(
         app,
@@ -931,6 +986,7 @@ def test_monitoring_stack_prod_has_dashboard(cdk_env: cdk.Environment) -> None:
         log_retention_days=14,
         xray_sampling_rate=0.1,
         prod_cmk=cmk,
+        **_api_stack_auth_data_kwargs(app, cdk_env, env_name="prod"),
     )
     mon = MonitoringStack(
         app,
@@ -944,3 +1000,175 @@ def test_monitoring_stack_prod_has_dashboard(cdk_env: cdk.Environment) -> None:
     )
     template = assertions.Template.from_stack(mon)
     template.resource_count_is("AWS::CloudWatch::Dashboard", 1)
+
+
+# ---- Phase 2c — Auth feature wiring assertions -----------------------
+
+
+def _api_stack_template(env_name: str, cdk_env: cdk.Environment) -> assertions.Template:
+    app = cdk.App()
+    stack = ApiStack(
+        app,
+        f"Contricool-{env_name.capitalize()}-Api",
+        env=cdk_env,
+        env_name=env_name,
+        snapstart=False,
+        log_retention_days=14,
+        xray_sampling_rate=1.0,
+        **_api_stack_auth_data_kwargs(app, cdk_env, env_name=env_name),
+    )
+    return assertions.Template.from_stack(stack)
+
+
+def test_api_stack_phase2c_jwt_authorizer_configured(
+    cdk_env: cdk.Environment,
+) -> None:
+    """JWT authorizer points at the per-env Cognito pool with the
+    audience set covering all three app clients."""
+    template = _api_stack_template("dev", cdk_env)
+    authorizers = template.find_resources("AWS::ApiGatewayV2::Authorizer")
+    assert len(authorizers) == 1, f"expected exactly 1 authorizer, got {len(authorizers)}"
+    props = next(iter(authorizers.values()))["Properties"]
+    assert props["AuthorizerType"] == "JWT"
+    jwt_config = props["JwtConfiguration"]
+    # The audience list ends up referencing CFN tokens for the three
+    # client IDs — assert the list length, not the exact values.
+    assert len(jwt_config["Audience"]) == 3
+    # Issuer URL contains the cognito-idp host pattern.
+    assert "Issuer" in jwt_config
+
+
+def test_api_stack_phase2c_public_auth_routes_have_no_authorizer(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Routes for the seven auth-bootstrap endpoints + /v1/health must
+    NOT carry an authorizer."""
+    template = _api_stack_template("dev", cdk_env)
+    routes = template.find_resources("AWS::ApiGatewayV2::Route")
+    public_paths = {
+        "POST /v1/auth/signup",
+        "POST /v1/auth/verify-email",
+        "POST /v1/auth/resend-email-code",
+        "POST /v1/auth/login",
+        "POST /v1/auth/refresh",
+        "POST /v1/auth/forgot-password",
+        "POST /v1/auth/reset-password",
+        "GET /v1/health",
+    }
+    found_public: set[str] = set()
+    for props in routes.values():
+        rk = props["Properties"].get("RouteKey", "")
+        if rk in public_paths:
+            assert "AuthorizerId" not in props["Properties"], (
+                f"public route {rk!r} unexpectedly has an authorizer"
+            )
+            found_public.add(rk)
+    missing = public_paths - found_public
+    assert not missing, f"public routes missing from synthesised template: {missing}"
+
+
+def test_api_stack_phase2c_logout_route_uses_jwt_authorizer(
+    cdk_env: cdk.Environment,
+) -> None:
+    template = _api_stack_template("dev", cdk_env)
+    routes = template.find_resources("AWS::ApiGatewayV2::Route")
+    logout_routes = [
+        props
+        for props in routes.values()
+        if props["Properties"].get("RouteKey") == "POST /v1/auth/logout"
+    ]
+    assert len(logout_routes) == 1
+    props = logout_routes[0]["Properties"]
+    assert props.get("AuthorizationType") == "JWT"
+    assert props.get("AuthorizerId")
+
+
+def test_api_stack_phase2c_catchall_route_uses_jwt_authorizer(
+    cdk_env: cdk.Environment,
+) -> None:
+    template = _api_stack_template("dev", cdk_env)
+    routes = template.find_resources("AWS::ApiGatewayV2::Route")
+    catchall = [
+        props
+        for props in routes.values()
+        if props["Properties"].get("RouteKey", "").endswith("/{proxy+}")
+    ]
+    assert len(catchall) == 1
+    props = catchall[0]["Properties"]
+    assert props.get("AuthorizationType") == "JWT"
+
+
+def test_api_stack_phase2c_per_route_throttling_present(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Stage default-route + per-route throttles match design.md.
+
+    The route-settings map is required for /v1/auth/login,
+    /v1/auth/resend-email-code, and /v1/auth/forgot-password
+    (CLAUDE.md red-line 2)."""
+    import json
+
+    template = _api_stack_template("dev", cdk_env)
+    stages = template.find_resources("AWS::ApiGatewayV2::Stage")
+    blob = json.dumps(list(stages.values()))
+    for path in (
+        "POST /v1/auth/login",
+        "POST /v1/auth/resend-email-code",
+        "POST /v1/auth/forgot-password",
+    ):
+        assert path in blob, f"per-route throttle missing for {path!r}"
+
+
+def test_api_stack_phase2c_lambda_iam_cognito_actions_enumerated(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Lambda IAM must enumerate cognito-idp actions explicitly. ``*``
+    or wildcard ``cognito-idp:*`` is rejected — N31 negative."""
+    import json
+
+    template = _api_stack_template("dev", cdk_env)
+    policies = template.find_resources("AWS::IAM::Policy")
+    blob = json.dumps(list(policies.values()))
+
+    # The eight enumerated actions must all appear.
+    for action in (
+        "cognito-idp:SignUp",
+        "cognito-idp:ConfirmSignUp",
+        "cognito-idp:ResendConfirmationCode",
+        "cognito-idp:InitiateAuth",
+        "cognito-idp:GlobalSignOut",
+        "cognito-idp:ForgotPassword",
+        "cognito-idp:ConfirmForgotPassword",
+        "cognito-idp:AdminGetUser",
+    ):
+        assert action in blob, f"Lambda IAM missing required action {action!r}"
+
+    # No wildcard cognito-idp action permitted.
+    assert '"cognito-idp:*"' not in blob, (
+        "Lambda must not have wildcard cognito-idp:* — enumerate actions"
+    )
+
+
+def test_api_stack_phase2c_lambda_iam_ddb_actions_enumerated(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Lambda IAM grants on the Users table cover only Get/Put/Update —
+    no Scan, no DeleteItem, no BatchWriteItem (N32)."""
+    import json
+
+    template = _api_stack_template("dev", cdk_env)
+    policies = template.find_resources("AWS::IAM::Policy")
+    blob = json.dumps(list(policies.values()))
+
+    for action in ("dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"):
+        assert action in blob, f"Lambda IAM missing required DDB action {action!r}"
+
+    # Forbidden actions.
+    for action in (
+        "dynamodb:Scan",
+        "dynamodb:DeleteItem",
+        "dynamodb:BatchWriteItem",
+    ):
+        assert action not in blob, (
+            f"Lambda IAM must NOT grant {action!r} on the Users table"
+        )

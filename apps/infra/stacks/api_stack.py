@@ -33,6 +33,12 @@ from aws_cdk import (
     aws_apigatewayv2_integrations as apigwv2_integrations,
 )
 from aws_cdk import (
+    aws_cognito as cognito,
+)
+from aws_cdk import (
+    aws_dynamodb as dynamodb,
+)
+from aws_cdk import (
     aws_ecr_assets as ecr_assets,
 )
 from aws_cdk import (
@@ -48,6 +54,44 @@ from aws_cdk import (
     aws_logs as logs,
 )
 from constructs import Construct
+
+# Auth-bootstrap routes (Design 4 / Phase 2c) that are reachable
+# without a JWT — explicit ``add_routes`` with no authorizer wins
+# over the catch-all ``/{proxy+}`` (HTTP API: more specific wins).
+_PUBLIC_AUTH_PATHS: list[str] = [
+    "/v1/auth/signup",
+    "/v1/auth/verify-email",
+    "/v1/auth/resend-email-code",
+    "/v1/auth/login",
+    "/v1/auth/refresh",
+    "/v1/auth/forgot-password",
+    "/v1/auth/reset-password",
+]
+
+# Per-route throttling — CLAUDE.md red-line 2 cost guardrails.
+_ROUTE_THROTTLES: dict[str, dict[str, int]] = {
+    "POST /v1/auth/login": {"ThrottlingRateLimit": 5, "ThrottlingBurstLimit": 10},
+    "POST /v1/auth/resend-email-code": {
+        "ThrottlingRateLimit": 1,
+        "ThrottlingBurstLimit": 5,
+    },
+    "POST /v1/auth/forgot-password": {
+        "ThrottlingRateLimit": 1,
+        "ThrottlingBurstLimit": 5,
+    },
+}
+
+# Cognito IAM actions the Lambda needs — enumerated, never ``*``.
+_COGNITO_ACTIONS: list[str] = [
+    "cognito-idp:SignUp",
+    "cognito-idp:ConfirmSignUp",
+    "cognito-idp:ResendConfirmationCode",
+    "cognito-idp:InitiateAuth",
+    "cognito-idp:GlobalSignOut",
+    "cognito-idp:ForgotPassword",
+    "cognito-idp:ConfirmForgotPassword",
+    "cognito-idp:AdminGetUser",
+]
 
 _LOG_RETENTION_DAYS_TO_ENUM: dict[int, logs.RetentionDays] = {
     1: logs.RetentionDays.ONE_DAY,
@@ -77,6 +121,11 @@ class ApiStack(Stack):
         snapstart: bool,
         log_retention_days: int,
         xray_sampling_rate: float,
+        user_pool: cognito.IUserPool,
+        web_client: cognito.IUserPoolClient,
+        ios_client: cognito.IUserPoolClient,
+        android_client: cognito.IUserPoolClient,
+        users_table: dynamodb.ITable,
         reserved_concurrent_executions: int = 100,
         prod_cmk: kms.IKey | None = None,
         app_version: str = "0.0.1-dev",
@@ -146,6 +195,26 @@ class ApiStack(Stack):
                 )
             prod_cmk.grant_decrypt(self.lambda_function)
 
+        # Phase 2c — Cognito + DDB grants for the auth feature.
+        # Enumerated cognito-idp actions only — no ``*``. Resource is
+        # the per-env pool ARN; cross-env access is impossible.
+        self.lambda_function.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=list(_COGNITO_ACTIONS),
+                resources=[user_pool.user_pool_arn],
+            )
+        )
+        # DDB: GetItem/PutItem/UpdateItem only — no Scan, no
+        # BatchWriteItem, no DeleteItem. ``grant`` (singular) keeps the
+        # action set tight; ``grant_read_write_data`` would add Scan +
+        # BatchWriteItem which we explicitly reject.
+        users_table.grant(
+            self.lambda_function,
+            "dynamodb:GetItem",
+            "dynamodb:PutItem",
+            "dynamodb:UpdateItem",
+        )
+
         # X-Ray sampling rate is documented; concrete sampling rule lives in
         # the X-Ray service config and is set as part of the monitoring stack.
         # (Tracing.ACTIVE here means the function emits segments; the rate is
@@ -213,16 +282,78 @@ class ApiStack(Stack):
             "ApiLambdaIntegration",
             handler=self.lambda_alias,
         )
+
+        # JWT authorizer for ``/v1/*`` — Phase 2c. We use the L1
+        # ``CfnAuthorizer`` because the ``aws_apigatewayv2_authorizers_alpha``
+        # module is unstable and pinning brings constant CDK upgrade
+        # churn. Direct CFN keeps the construct surface narrow.
+        cfn_authorizer = apigwv2.CfnAuthorizer(
+            self,
+            "JwtAuthorizer",
+            api_id=self.api_gateway.api_id,
+            authorizer_type="JWT",
+            identity_source=["$request.header.Authorization"],
+            jwt_configuration=apigwv2.CfnAuthorizer.JWTConfigurationProperty(
+                audience=[
+                    web_client.user_pool_client_id,
+                    ios_client.user_pool_client_id,
+                    android_client.user_pool_client_id,
+                ],
+                issuer=(
+                    f"https://cognito-idp.{self.region}.amazonaws.com/"
+                    f"{user_pool.user_pool_id}"
+                ),
+            ),
+            name=f"contricool-{env_name}-jwt-authorizer",
+        )
+
+        # Public auth-bootstrap routes — explicit, no authorizer. HTTP
+        # API picks the more-specific match before the catch-all.
+        for path in _PUBLIC_AUTH_PATHS:
+            self.api_gateway.add_routes(
+                path=path,
+                methods=[apigwv2.HttpMethod.POST],
+                integration=integration,
+            )
+
+        # ``/v1/health`` is also public; it's already implicit under the
+        # catch-all pattern below, so we declare an explicit route to
+        # bypass the JWT authorizer that the catch-all attaches.
         self.api_gateway.add_routes(
+            path="/v1/health",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integration,
+        )
+
+        # Catch-all route — JWT authorizer attached via L1 override.
+        # The L2 ``add_routes`` returns the created routes; we patch
+        # each one to point at the authorizer.
+        catchall_routes = self.api_gateway.add_routes(
             path="/{proxy+}",
             methods=[apigwv2.HttpMethod.ANY],
             integration=integration,
         )
+        for route in catchall_routes:
+            cfn_route = route.node.default_child
+            assert isinstance(cfn_route, cdk.CfnResource)
+            cfn_route.add_property_override("AuthorizerId", cfn_authorizer.ref)
+            cfn_route.add_property_override("AuthorizationType", "JWT")
+
+        # Authenticated explicit routes — POST /v1/auth/logout requires JWT.
+        logout_routes = self.api_gateway.add_routes(
+            path="/v1/auth/logout",
+            methods=[apigwv2.HttpMethod.POST],
+            integration=integration,
+        )
+        for route in logout_routes:
+            cfn_route = route.node.default_child
+            assert isinstance(cfn_route, cdk.CfnResource)
+            cfn_route.add_property_override("AuthorizerId", cfn_authorizer.ref)
+            cfn_route.add_property_override("AuthorizationType", "JWT")
 
         # Stage-level throttling — defense in depth at API Gateway.
-        # Values match CLAUDE.md red-line 2: 5,000 RPS / 10,000 burst.
-        # Per-route tighter throttling for hot routes (auth, friends/add)
-        # lands in Phase 2 once those routes exist.
+        # Values match CLAUDE.md red-line 2: 5,000 RPS / 10,000 burst,
+        # plus per-route tighter throttling on hot auth routes.
         default_stage = self.api_gateway.default_stage
         assert default_stage is not None, "HttpApi default_stage should always exist"
         cfn_default_stage = default_stage.node.default_child
@@ -233,6 +364,10 @@ class ApiStack(Stack):
                     "ThrottlingBurstLimit": 10000,
                     "ThrottlingRateLimit": 5000,
                 },
+            )
+            cfn_default_stage.add_property_override(
+                "RouteSettings",
+                _ROUTE_THROTTLES,
             )
 
         cdk.CfnOutput(
