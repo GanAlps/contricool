@@ -18,7 +18,7 @@ function makeMw(
   overrides: Partial<Parameters<typeof authMiddleware>[0]> = {},
 ): ReturnType<typeof authMiddleware> {
   return authMiddleware({
-    getAccessToken: () => null,
+    getTokens: () => null,
     onUnauthenticated: () => {},
     ...overrides,
   });
@@ -35,41 +35,43 @@ afterEach(() => {
 
 describe('authMiddleware.onRequest', () => {
   it('attaches Authorization on non-/auth/ paths when a token is available', async () => {
-    const mw = makeMw({ getAccessToken: () => 'tok-1' });
+    const mw = makeMw({ getTokens: () => ({ accessToken: 'tok-1', idToken: 'id-1' }) });
     const req = new Request('http://localhost/v1/me', { method: 'GET' });
     const out = (await mw.onRequest!({
       request: req,
       schemaPath: '',
       params: {},
     } as never)) as Request;
-    expect(out.headers.get('authorization')).toBe('Bearer tok-1');
+    expect(out.headers.get('authorization')).toBe('Bearer id-1');
   });
 
-  it('attaches Authorization on /auth/logout (the one authenticated /auth/* route)', async () => {
-    // Regression: Phase 2d's middleware skipped bearer attach on every
-    // `/auth/*` path.  Logout needs the bearer for the JWT authorizer
-    // to succeed and for Cognito GlobalSignOut to clear server-side
-    // refresh tokens; without it the cookie clear never happens and
-    // hard-reload after sign-out re-hydrates the session.
-    const mw = makeMw({ getAccessToken: () => 'tok-1' });
+  it('attaches both id and access tokens on /auth/logout (Phase 2c two-token contract)', async () => {
+    // Backend (PR #22) requires:
+    //   Authorization: Bearer <id_token>
+    //   X-Cognito-Access-Token: <access_token>
+    // Without either, logout 401s, GlobalSignOut never fires, and the
+    // refresh cookie isn't cleared — hard-reload re-hydrates the session.
+    const mw = makeMw({ getTokens: () => ({ accessToken: 'tok-1', idToken: 'id-1' }) });
     const req = new Request('http://localhost/v1/auth/logout', { method: 'POST' });
     const out = (await mw.onRequest!({
       request: req,
       schemaPath: '',
       params: {},
     } as never)) as Request;
-    expect(out.headers.get('authorization')).toBe('Bearer tok-1');
+    expect(out.headers.get('authorization')).toBe('Bearer id-1');
+    expect(out.headers.get('x-cognito-access-token')).toBe('tok-1');
   });
 
-  it('attaches Authorization on /auth/login too (public routes ignore it; simpler than special-casing)', async () => {
-    const mw = makeMw({ getAccessToken: () => 'tok-1' });
+  it('attaches Authorization on /auth/login but no X-Cognito-Access-Token', async () => {
+    const mw = makeMw({ getTokens: () => ({ accessToken: 'tok-1', idToken: 'id-1' }) });
     const req = new Request('http://localhost/v1/auth/login', { method: 'POST' });
     const out = (await mw.onRequest!({
       request: req,
       schemaPath: '',
       params: {},
     } as never)) as Request;
-    expect(out.headers.get('authorization')).toBe('Bearer tok-1');
+    expect(out.headers.get('authorization')).toBe('Bearer id-1');
+    expect(out.headers.get('x-cognito-access-token')).toBeNull();
   });
 
   it('skips Authorization when no token is available', async () => {
@@ -128,7 +130,7 @@ describe('authMiddleware.onResponse', () => {
   });
 
   it('handles a POST whose body clone throws (defensive REPLAY_BODY catch)', async () => {
-    const mw = makeMw({ getAccessToken: () => 't' });
+    const mw = makeMw({ getTokens: () => ({ accessToken: 't', idToken: 'id' }) });
     const req = new Request('http://localhost/v1/transactions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -141,13 +143,13 @@ describe('authMiddleware.onResponse', () => {
     });
     // Should not throw — the defensive catch sets the slot to null.
     await mw.onRequest!({ request: req, schemaPath: '', params: {} } as never);
-    expect(req.headers.get('authorization')).toBe('Bearer t');
+    expect(req.headers.get('authorization')).toBe('Bearer id');
   });
 
   it('replays a POST 401 with the original body intact (B1 regression)', async () => {
     const onRefreshed = vi.fn();
     const mw = makeMw({
-      getAccessToken: () => 'old-token',
+      getTokens: () => ({ accessToken: 'old-token', idToken: 'old-id' }),
       onTokenRefreshed: onRefreshed,
     });
     fetchMock.mockResolvedValueOnce(
@@ -184,14 +186,14 @@ describe('authMiddleware.onResponse', () => {
     const replayBody = await replayCall.text();
     expect(replayBody).toBe(originalBody);
     expect(replayCall.method).toBe('POST');
-    expect(replayCall.headers.get('authorization')).toBe('Bearer new-token');
+    expect(replayCall.headers.get('authorization')).toBe('Bearer new-id');
     expect(replayCall.headers.get('content-type')).toBe('application/json');
   });
 
   it('refresh succeeds → retries original with new bearer → returns retry response (N3)', async () => {
     const onRefreshed = vi.fn();
     const mw = makeMw({
-      getAccessToken: () => 'old-token',
+      getTokens: () => ({ accessToken: 'old-token', idToken: 'old-id' }),
       onTokenRefreshed: onRefreshed,
     });
     fetchMock.mockResolvedValueOnce(
@@ -218,7 +220,7 @@ describe('authMiddleware.onResponse', () => {
     const refreshCall = fetchMock.mock.calls[0]?.[0] as Request;
     expect(refreshCall.url).toBe('http://localhost/v1/auth/refresh');
     const replayCall = fetchMock.mock.calls[1]?.[0] as Request;
-    expect(replayCall.headers.get('authorization')).toBe('Bearer new-token');
+    expect(replayCall.headers.get('authorization')).toBe('Bearer new-id');
     expect(onRefreshed).toHaveBeenCalledWith({
       access_token: 'new-token',
       id_token: 'new-id',
@@ -229,7 +231,7 @@ describe('authMiddleware.onResponse', () => {
   it('refresh fails → onUnauthenticated called → original 401 surfaced', async () => {
     const onUnauth = vi.fn();
     const mw = makeMw({
-      getAccessToken: () => 'old-token',
+      getTokens: () => ({ accessToken: 'old-token', idToken: 'old-id' }),
       onUnauthenticated: onUnauth,
     });
     fetchMock.mockResolvedValueOnce(
@@ -248,7 +250,10 @@ describe('authMiddleware.onResponse', () => {
 
   it('refresh network error is treated as a refresh failure', async () => {
     const onUnauth = vi.fn();
-    const mw = makeMw({ getAccessToken: () => 't', onUnauthenticated: onUnauth });
+    const mw = makeMw({
+      getTokens: () => ({ accessToken: 't', idToken: 'id' }),
+      onUnauthenticated: onUnauth,
+    });
     fetchMock.mockRejectedValueOnce(new Error('network'));
     const req = new Request('http://localhost/v1/me');
     const res = jsonRes({ error: { code: 'UNAUTHENTICATED', message: 'x', request_id: 'r' } }, 401);
@@ -260,7 +265,7 @@ describe('authMiddleware.onResponse', () => {
 
   it('onUnauthenticated errors are swallowed', async () => {
     const mw = makeMw({
-      getAccessToken: () => 't',
+      getTokens: () => ({ accessToken: 't', idToken: 'id' }),
       onUnauthenticated: () => {
         throw new Error('boom');
       },
@@ -277,7 +282,7 @@ describe('authMiddleware.onResponse', () => {
 
   it('uses the injected refreshUrl when provided', async () => {
     const refreshUrl = vi.fn(() => 'http://example.com/special-refresh');
-    const mw = makeMw({ getAccessToken: () => 't', refreshUrl });
+    const mw = makeMw({ getTokens: () => ({ accessToken: 't', idToken: 'id' }), refreshUrl });
     fetchMock.mockResolvedValueOnce(
       jsonRes({ access_token: 'x', id_token: 'y', expires_in: 1 }, 200),
     );
@@ -291,7 +296,7 @@ describe('authMiddleware.onResponse', () => {
   });
 
   it('falls back to a host-relative refresh path when no version prefix is found', async () => {
-    const mw = makeMw({ getAccessToken: () => 't' });
+    const mw = makeMw({ getTokens: () => ({ accessToken: 't', idToken: 'id' }) });
     fetchMock.mockResolvedValueOnce(
       jsonRes({ access_token: 'x', id_token: 'y', expires_in: 1 }, 200),
     );
@@ -304,7 +309,7 @@ describe('authMiddleware.onResponse', () => {
   });
 
   it('builds same-origin refresh path for relative URLs', async () => {
-    const mw = makeMw({ getAccessToken: () => 't' });
+    const mw = makeMw({ getTokens: () => ({ accessToken: 't', idToken: 'id' }) });
     fetchMock.mockResolvedValueOnce(
       jsonRes({ access_token: 'x', id_token: 'y', expires_in: 1 }, 200),
     );

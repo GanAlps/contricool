@@ -14,7 +14,13 @@ import { useAuthStore } from './auth-store';
 /** Singleton SDK client used by the auth driver and (later) feature modules. */
 export const apiClient: ContricoolClient = createClient({
   baseUrl: process.env.EXPO_PUBLIC_API_BASE_URL ?? '/v1',
-  getAccessToken: () => useAuthStore.getState().accessToken,
+  getTokens: () => {
+    const s = useAuthStore.getState();
+    if (!s.accessToken || !s.idToken) {
+      return null;
+    }
+    return { accessToken: s.accessToken, idToken: s.idToken };
+  },
   onUnauthenticated: async () => {
     useAuthStore.getState()._clear();
   },

@@ -2,9 +2,20 @@ import type { Middleware, MiddlewareCallbackParams } from 'openapi-fetch';
 
 import { ApiErrorException, parseError } from './errors';
 
+export type AuthTokens = { accessToken: string; idToken: string };
+
 export type AuthMiddlewareOptions = {
-  /** Returns the current access token, or null if signed out. */
-  getAccessToken: () => string | null;
+  /**
+   * Returns the current id and access tokens, or null if signed out.
+   *
+   * Phase 2c contract (two-token pattern, see PR #22):
+   * - `Authorization: Bearer <id_token>` on every authenticated call.
+   *   The Lambda rejects access tokens here because Cognito access
+   *   tokens don't carry the identity claims `Principal` needs.
+   * - `X-Cognito-Access-Token: <access_token>` only on `/auth/logout`
+   *   (Cognito `GlobalSignOut` needs the raw access token).
+   */
+  getTokens: () => AuthTokens | null;
   /**
    * Called after a refresh succeeds — the consumer (auth store) can
    * persist the new tokens.
@@ -57,23 +68,24 @@ function defaultRefreshUrl(originalUrl: string): string {
 export function authMiddleware(opts: AuthMiddlewareOptions): Middleware {
   return {
     async onRequest({ request }: MiddlewareCallbackParams): Promise<Request> {
-      // Attach the bearer whenever a token is available.
+      // Phase 2c two-token pattern (see PR #22):
+      // - `Authorization: Bearer <id_token>` on every authenticated
+      //   call. The Lambda rejects access tokens here because Cognito
+      //   access tokens don't carry `email` / `name` /
+      //   `custom:user_id`, which the `Principal` model requires.
+      // - `X-Cognito-Access-Token: <access_token>` only on
+      //   `/auth/logout`. Cognito `GlobalSignOut` needs the raw
+      //   access token; without this the cookie clear never happens
+      //   and hard-reload after sign-out re-hydrates the session.
       //
-      // The original Phase 2d code skipped this for any `/auth/*` path
-      // on the assumption that all auth-bootstrap routes are public.
-      // That assumption was wrong: `/auth/logout` is the one
-      // **authenticated** route in the auth bootstrap (Phase 2c R6.1).
-      // Without the bearer, the JWT authorizer 401s before the handler
-      // runs, so Cognito GlobalSignOut never fires AND the backend
-      // never sends the `Set-Cookie: rt=; Max-Age=0` cookie clear —
-      // hard-reload after sign-out re-hydrates the session.
-      //
-      // The other `/auth/*` routes (login, signup, refresh, …) ignore
-      // the Authorization header entirely, so attaching it there is a
-      // harmless no-op.
-      const t = opts.getAccessToken();
-      if (t) {
-        request.headers.set('authorization', `Bearer ${t}`);
+      // Public `/auth/*` routes (login, signup, refresh, …) ignore
+      // both headers, so attaching them is a harmless no-op there.
+      const tokens = opts.getTokens();
+      if (tokens) {
+        request.headers.set('authorization', `Bearer ${tokens.idToken}`);
+        if (new URL(request.url).pathname.endsWith('/auth/logout')) {
+          request.headers.set('x-cognito-access-token', tokens.accessToken);
+        }
       }
       // Phase 2e — capture the body BEFORE openapi-fetch consumes the
       // request stream.  The 401-retry path below has to send the same
@@ -139,7 +151,11 @@ export function authMiddleware(opts: AuthMiddlewareOptions): Middleware {
           // onRequest is what we re-attach.
           const flaggedReq = request as FlaggedRequest;
           const replayHeaders = new Headers(request.headers);
-          replayHeaders.set('authorization', `Bearer ${tokens.access_token}`);
+          // Two-token pattern: Authorization gets the id token; the
+          // access token rides on X-Cognito-Access-Token (only logout
+          // reads it, and logout never goes through this retry path
+          // because /auth/* 401s are not retried).
+          replayHeaders.set('authorization', `Bearer ${tokens.id_token}`);
           const method = request.method.toUpperCase();
           const carriesBody = method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS';
           const replay = new Request(request.url, {

@@ -37,7 +37,7 @@ describe('createClient', () => {
     );
     const client = createClient({
       baseUrl: 'http://localhost/v1',
-      getAccessToken: () => null,
+      getTokens: () => null,
       onUnauthenticated: () => {},
     });
     const r = await client.POST('/auth/login', {
@@ -56,7 +56,7 @@ describe('createClient', () => {
     );
     const client = createClient({
       baseUrl: 'http://localhost/v1',
-      getAccessToken: () => null,
+      getTokens: () => null,
       onUnauthenticated: () => {},
     });
     await expect(
