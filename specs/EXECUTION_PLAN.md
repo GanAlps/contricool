@@ -161,9 +161,9 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 
 | Sub-phase | Scope | Spec |
 |---|---|---|
-| 2a | CDK Auth + Data stacks + PII salt SSM | `specs/phase-2a-cognito-ddb-foundation/` |
-| 2b | Backend `app/core/` (config, principal, observability, lookup_hash, JWT middleware) | TBD |
-| 2c | Backend `auth` feature (signup/verify/login/refresh/forgot/reset + rate-limit) | TBD |
+| 2a | CDK Auth + Data stacks + PII salt SSM | `specs/phase-2a-cognito-ddb-foundation/` ✅ shipped (PR #13) |
+| 2b | Backend `app/core/` (config, principal, observability, lookup_hash, middleware) | `specs/phase-2b-app-core/` |
+| 2c | Backend `auth` feature (signup/verify/login/refresh/forgot/reset + rate-limit + JWT verifier) | TBD |
 | 2d | Expo client foundation + auth screens | TBD |
 | 2e | OpenAPI + SDK regen + end-to-end wiring | TBD |
 
