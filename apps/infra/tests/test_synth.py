@@ -1215,3 +1215,44 @@ def test_api_stack_phase2c_no_unprotected_non_public_routes(
         "Found non-public routes without JWT authorizer attached:\n  "
         + "\n  ".join(offenders)
     )
+
+
+def test_api_stack_phase2c_stage_depends_on_throttled_routes(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Stage must declare an explicit DependsOn on every route named in
+    its ``RouteSettings`` map. Without this, CloudFormation can update
+    the Stage in parallel with route creation and reject the changeset
+    with ``Unable to find Route by key … within the provided
+    RouteSettings`` — the bug that broke the Phase 2c first deploy.
+    """
+    template = _api_stack_template("dev", cdk_env)
+    stages = template.find_resources("AWS::ApiGatewayV2::Stage")
+    assert len(stages) == 1, "expected exactly one Stage"
+    (stage_props,) = stages.values()
+    route_settings = stage_props["Properties"].get("RouteSettings", {})
+    depends_on = stage_props.get("DependsOn", [])
+    if isinstance(depends_on, str):
+        depends_on = [depends_on]
+
+    routes = template.find_resources("AWS::ApiGatewayV2::Route")
+    # Map RouteKey → logical id so we can resolve _ROUTE_THROTTLES keys
+    # to the synthesised route resource.
+    route_logical_id_by_key: dict[str, str] = {
+        props["Properties"]["RouteKey"]: logical_id
+        for logical_id, props in routes.items()
+    }
+
+    missing: list[str] = []
+    for route_key in route_settings:
+        logical_id = route_logical_id_by_key.get(route_key)
+        assert logical_id is not None, (
+            f"RouteSettings references {route_key!r} but no matching "
+            f"AWS::ApiGatewayV2::Route resource was synthesised"
+        )
+        if logical_id not in depends_on:
+            missing.append(route_key)
+    assert not missing, (
+        "Stage RouteSettings reference routes without a DependsOn entry:\n  "
+        + "\n  ".join(missing)
+    )
