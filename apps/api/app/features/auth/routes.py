@@ -138,15 +138,35 @@ async def refresh(
 # ---- Logout --------------------------------------------------------
 
 
+_ACCESS_TOKEN_HEADER = "x-cognito-access-token"
+
+
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def logout(
     request: Request,
     response: Response,
     _principal: Principal = Depends(current_principal),  # noqa: B008
 ) -> None:
-    auth_header = request.headers.get("authorization", "")
-    # current_principal already validated the bearer prefix; trust it.
-    access_token = auth_header[len("Bearer ") :].strip()
+    # ``Authorization: Bearer <id_token>`` provides the principal. Cognito
+    # ``GlobalSignOut`` requires a real *access* token, which doesn't
+    # carry the identity claims our ``Principal`` model needs — so the
+    # access token rides in a separate header. We clear the refresh
+    # cookie even if ``GlobalSignOut`` fails so a partial logout doesn't
+    # leave a usable refresh token in the browser.
+    access_token = request.headers.get(_ACCESS_TOKEN_HEADER, "").strip()
+    if not access_token:
+        # 400 (not 401) — the principal authenticated successfully; the
+        # request itself is malformed. Distinct ``MISSING_ACCESS_TOKEN``
+        # code so the SDK can surface "you sent the id token but forgot
+        # the access token" without conflating it with auth failure.
+        # ``clear_refresh_cookie=True`` so a partial logout doesn't leave
+        # a usable refresh token in the browser.
+        raise AuthError(
+            code="MISSING_ACCESS_TOKEN",
+            http_status=400,
+            message="X-Cognito-Access-Token header is required for logout.",
+            clear_refresh_cookie=True,
+        )
     try:
         service.logout(access_token)
     finally:

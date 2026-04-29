@@ -71,13 +71,19 @@ def base_id_claims(
 
 def base_access_claims(
     *,
-    user_id: str = "01HK3W7QF6VMYG8XR3DQ7B5N6P",
-    email: str = "alice@example.com",
-    name: str = "Alice",
     client_id: str = DEFAULT_AUDIENCE_IDS[0],
     iss: str = DEFAULT_ISSUER,
     extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Cognito-shaped *access* token claims.
+
+    Real Cognito access tokens carry only the AWS-API authorization
+    surface — ``sub``, ``client_id``, ``token_use``, ``scope``,
+    ``username`` and timing claims. They never include ``email``,
+    ``name``, or any ``custom:*`` attribute; those live on the
+    *id* token. Tests that need a Principal must mint an id token via
+    :func:`base_id_claims`.
+    """
     now = int(time.time())
     claims: dict[str, Any] = {
         "sub": "cognito-sub-uuid-0001",
@@ -88,11 +94,7 @@ def base_access_claims(
         "iat": now,
         "exp": now + 3600,
         "scope": "aws.cognito.signin.user.admin",
-        # Some Cognito access tokens include these — keep present so
-        # Principal.from_claims can read them when used as auth source.
-        "email": email,
-        "name": name,
-        "custom:user_id": user_id,
+        "username": "cognito-sub-uuid-0001",
     }
     if extra:
         claims.update(extra)
