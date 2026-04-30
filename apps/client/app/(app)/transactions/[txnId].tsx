@@ -185,14 +185,10 @@ export default function TransactionDetailScreen() {
                 }
                 return;
               }
-              const undoId = toast.success(`Deleted "${t.name}". Tap to undo.`, 10_000);
-              // Best-effort undo: tapping the toast issues :restore.
-              // The Toaster component dispatches a press → dismiss; we
-              // hook into the dismiss via a side-channel by storing
-              // the toast id and listening for a manual press call.
-              // For now we expose an explicit Undo button on the
-              // detail page below the toast so the contract is clear.
-              void undoId;
+              // Toast-based undo is a follow-up; for now the user
+              // restores from the detail page's restore bar (visible
+              // on a soft-deleted txn) within the 30-day window.
+              toast.success(`Deleted "${t.name}".`);
               router.back();
             }}
           >
