@@ -219,10 +219,15 @@ def query_comments(
     else:
         key_expr = "PK = :pk AND begins_with(SK, :sk_prefix)"
 
+    # DDB ``BETWEEN`` is inclusive on both ends, so when ``last_sk`` is
+    # set the query returns the cursor row itself and the post-query
+    # filter below drops it. Fetch one extra row to compensate so the
+    # ``has_more`` accounting still holds.
+    fetch_limit = (limit + 2) if last_sk else (limit + 1)
     response = _transactions_table().query(
         KeyConditionExpression=key_expr,
         ExpressionAttributeValues=expr_values,
-        Limit=limit + 1,
+        Limit=fetch_limit,
         ScanIndexForward=True,
     )
     items = list(response.get("Items") or [])

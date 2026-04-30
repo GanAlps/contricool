@@ -277,6 +277,9 @@ def test_list_comments_non_member_404(
 def test_list_comments_pagination(
     txn_env: dict[str, object], txn_client: TestClient
 ) -> None:
+    """Walk every page so the cursor inclusivity bug
+    (regression: query_comments BETWEEN drops the trailing row when
+    Limit doesn't account for the filtered cursor) stays fixed."""
     _seed_two_friends(txn_env)
     txn = _create_txn(
         txn_client, members=[A, B], payer=A, payer_email="a@x.com",
@@ -305,6 +308,17 @@ def test_list_comments_pagination(
     assert r2.status_code == 200
     body2 = r2.json()
     assert [it["body"] for it in body2["items"]] == ["#2", "#3"]
+    # 5 comments, page size 2 → there is still #4 to return.
+    assert body2["next_cursor"] is not None
+
+    r3 = txn_client.get(
+        f"/v1/transactions/{txn['txn_id']}/comments?limit=2&cursor={body2['next_cursor']}",
+        headers=auth_headers_for(A, "a@x.com"),
+    )
+    assert r3.status_code == 200
+    body3 = r3.json()
+    assert [it["body"] for it in body3["items"]] == ["#4"]
+    assert body3["next_cursor"] is None
 
 
 # ---- System comment on update --------------------------------------
