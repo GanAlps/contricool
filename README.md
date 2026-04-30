@@ -8,15 +8,17 @@ The repo is **public**. Treat every commit as a press release: no secrets, no en
 
 ## Status
 
-**Phase 0 — Repo bootstrap & safety nets.** Full execution plan: [`specs/EXECUTION_PLAN.md`](specs/EXECUTION_PLAN.md).
+**Phase 7 — Pre-launch polish.** Full execution plan: [`specs/EXECUTION_PLAN.md`](specs/EXECUTION_PLAN.md).
 
 Functional scope of MVP:
 
-- Sign up with email + phone (both verified).
-- Add friends by exact email or phone.
+- Sign up with email (phone is optional, unverified metadata).
+- Add friends by exact email.
 - Create transactions among friends with multiple split methods.
 - List transactions; list with a specific friend; per-pair balances.
 - Edit / delete / restore your own transactions.
+- Account self-service: export your data (JSON, 1/day), delete your account (30-day grace, then hard-delete).
+- Privacy Policy and Terms of Service shipped at `/privacy` and `/terms`.
 
 Designs for every component are in [`specs/`](specs/).
 

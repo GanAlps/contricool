@@ -555,6 +555,87 @@ def test_extract_auth_result_extracts_known_fields() -> None:
     }
 
 
+# ---- Phase 7 admin lifecycle -----------------------------------------
+
+
+def test_admin_disable_user_succeeds(
+    cognito: cc.CognitoClient, moto_cognito: dict[str, str]
+) -> None:
+    """Pre-create a user, disable, confirm disabled state."""
+    _signup(cognito, moto_cognito)
+    cognito.admin_disable_user(email="alice@example.com")
+    raw = boto3.client("cognito-idp", region_name="us-west-2").admin_get_user(
+        UserPoolId=moto_cognito["user_pool_id"],
+        Username="alice@example.com",
+    )
+    assert raw["Enabled"] is False
+
+
+def test_admin_disable_user_unknown_maps_to_404(
+    cognito: cc.CognitoClient,
+) -> None:
+    with pytest.raises(AuthError) as ei:
+        cognito.admin_disable_user(email="ghost@example.com")
+    assert ei.value.http_status == 404
+
+
+def test_admin_user_global_sign_out_succeeds(
+    cognito: cc.CognitoClient, moto_cognito: dict[str, str]
+) -> None:
+    _signup(cognito, moto_cognito)
+    # Should not raise.
+    cognito.admin_user_global_sign_out(email="alice@example.com")
+
+
+def test_admin_user_global_sign_out_unknown_maps_to_404(
+    cognito: cc.CognitoClient,
+) -> None:
+    with pytest.raises(AuthError) as ei:
+        cognito.admin_user_global_sign_out(email="ghost@example.com")
+    assert ei.value.http_status == 404
+
+
+def test_admin_delete_user_succeeds(
+    cognito: cc.CognitoClient, moto_cognito: dict[str, str]
+) -> None:
+    _signup(cognito, moto_cognito)
+    cognito.admin_delete_user(email="alice@example.com")
+    # Re-fetch should now miss.
+    with pytest.raises(ClientError):
+        boto3.client("cognito-idp", region_name="us-west-2").admin_get_user(
+            UserPoolId=moto_cognito["user_pool_id"],
+            Username="alice@example.com",
+        )
+
+
+def test_admin_delete_user_already_gone_is_idempotent(
+    cognito: cc.CognitoClient,
+) -> None:
+    """The cleanup Lambda may retry; ``UserNotFoundException`` must
+    short-circuit to a no-op so the retry succeeds."""
+    cognito.admin_delete_user(email="ghost@example.com")  # no raise
+
+
+def test_admin_delete_user_other_error_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+    cognito: cc.CognitoClient,
+) -> None:
+    """A non-UserNotFound ClientError must surface as AuthError."""
+    fake_err = ClientError(
+        {"Error": {"Code": "InternalError", "Message": "boom"}},
+        "AdminDeleteUser",
+    )
+
+    class _Stub:
+        def admin_delete_user(self, **_: Any) -> None:
+            raise fake_err
+
+    monkeypatch.setattr(cc, "_default_client", _Stub())
+    with pytest.raises(AuthError):
+        cognito.admin_delete_user(email="alice@example.com")
+    cc._set_client_for_tests(None)
+
+
 # ---- Test fixture sanity check ---------------------------------------
 
 

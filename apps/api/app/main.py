@@ -19,6 +19,7 @@ from app.core.middleware import install_core_middleware
 from app.features.auth import routes as auth_routes
 from app.features.auth.errors import install_error_handlers
 from app.features.friends import routes as friends_routes
+from app.features.me import routes as me_routes
 from app.features.telemetry import routes as telemetry_routes
 from app.features.transactions import routes as transactions_routes
 from app.routes import health
@@ -48,6 +49,7 @@ def create_app(*, load_config: bool = True) -> FastAPI:
     api.include_router(friends_routes.router, prefix="/v1")
     api.include_router(transactions_routes.router, prefix="/v1")
     api.include_router(telemetry_routes.router, prefix="/v1")
+    api.include_router(me_routes.router, prefix="/v1")
     return api
 
 

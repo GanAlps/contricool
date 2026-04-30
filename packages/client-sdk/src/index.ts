@@ -130,3 +130,13 @@ export type TransactionPayer = Transaction['payers'][number];
 
 export type SplitMethod = Transaction['split_method'];
 export type TxnType = Transaction['type'];
+
+// ---------------------------------------------------------------------------
+// Me / account surface (Phase 7).
+// ---------------------------------------------------------------------------
+
+export type ExportResponse =
+  AuthPaths['/me/export']['get']['responses']['200']['content']['application/json'];
+export type MeProfile = ExportResponse['profile'];
+export type FriendshipExport = ExportResponse['friendships'][number];
+export type TransactionExport = ExportResponse['transactions'][number];

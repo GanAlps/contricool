@@ -232,6 +232,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete My Account Route
+         * @description Soft-deactivate the current user.
+         *
+         *     Idempotent: a second call still returns 204. Cognito disable +
+         *     global-sign-out fire on every call so a half-applied prior
+         *     attempt heals on retry.
+         */
+        delete: operations["delete_my_account_route_v1_me_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export My Data Route
+         * @description JSON dump of the requester's data.
+         *
+         *     Rate-limited to one export per 24 h per user; subsequent calls
+         *     return 429 ``RATE_LIMITED`` with ``retry_after`` in seconds.
+         */
+        get: operations["export_my_data_route_v1_me_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/telemetry/error": {
         parameters: {
             query?: never;
@@ -419,6 +466,22 @@ export interface components {
              */
             type: "expense" | "settlement";
         };
+        /**
+         * ExportResponse
+         * @description ``GET /v1/me/export`` 200 response.
+         */
+        ExportResponse: {
+            /**
+             * Exported At
+             * Format: date-time
+             */
+            exported_at: string;
+            /** Friendships */
+            friendships: components["schemas"]["FriendshipExport"][];
+            profile: components["schemas"]["MeProfile"];
+            /** Transactions */
+            transactions: components["schemas"]["TransactionExport"][];
+        };
         /** ForgotPasswordRequest */
         ForgotPasswordRequest: {
             /**
@@ -481,6 +544,19 @@ export interface components {
             since: string;
             /** User Id */
             user_id: string;
+        };
+        /**
+         * FriendshipExport
+         * @description One friendship in the export.
+         */
+        FriendshipExport: {
+            /** Friend User Id */
+            friend_user_id: string;
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -545,6 +621,30 @@ export interface components {
             currency: "USD" | "INR";
             /** Name */
             name: string;
+            /** User Id */
+            user_id: string;
+        };
+        /**
+         * MeProfile
+         * @description Trimmed user profile on the export. Only the fields we own
+         *     server-side; raw email + phone come from Cognito and are not
+         *     re-exposed here.
+         */
+        MeProfile: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Currency
+             * @enum {string}
+             */
+            currency: "USD" | "INR";
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
             /** User Id */
             user_id: string;
         };
@@ -725,6 +825,58 @@ export interface components {
          * @description ``POST /v1/transactions`` 201 + ``GET /v1/transactions/{id}`` 200.
          */
         Transaction: {
+            /** Amount */
+            amount: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Creator Id */
+            creator_id: string;
+            /**
+             * Currency
+             * @enum {string}
+             */
+            currency: "USD" | "INR";
+            /** Deleted At */
+            deleted_at?: string | null;
+            /** Members */
+            members: components["schemas"]["Member"][];
+            /** Name */
+            name: string;
+            /** Note */
+            note: string;
+            /** Payers */
+            payers: components["schemas"]["Payer"][];
+            /**
+             * Split Method
+             * @enum {string}
+             */
+            split_method: "equal" | "amount" | "share" | "percent";
+            /**
+             * Txn Date
+             * Format: date
+             */
+            txn_date: string;
+            /** Txn Id */
+            txn_id: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "expense" | "settlement";
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * TransactionExport
+         * @description One transaction (META + members + payers) in the export.
+         */
+        TransactionExport: {
             /** Amount */
             amount: string;
             /**
@@ -1236,6 +1388,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    delete_my_account_route_v1_me_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    export_my_data_route_v1_me_export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportResponse"];
                 };
             };
         };

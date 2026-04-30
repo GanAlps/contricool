@@ -83,6 +83,16 @@ def cleanup_once() -> dict[str, int]:
     }
 
 
-def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
-    """EventBridge-shaped Lambda entrypoint."""
-    return cleanup_once()
+def handler(event: dict[str, Any], context: Any) -> dict[str, dict[str, int]]:
+    """EventBridge-shaped Lambda entrypoint.
+
+    Runs both cleanup passes (transactions + deactivated accounts)
+    and returns a structured summary so the invocation log shows
+    progress for each.
+    """
+    from app.cleanup import accounts as accounts_cleanup
+
+    return {
+        "transactions": cleanup_once(),
+        "accounts": accounts_cleanup.cleanup_accounts_once(),
+    }
