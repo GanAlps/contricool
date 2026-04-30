@@ -1,9 +1,17 @@
-import { Link } from 'expo-router';
-import { ScrollView, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 
 const EFFECTIVE = '2026-04-29';
 
 export default function TermsScreen() {
+  const router = useRouter();
+  const onBack = (): void => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/login');
+    }
+  };
   return (
     <ScrollView className="flex-1 bg-neutral-50" contentContainerClassName="p-6">
       <View className="mx-auto w-full max-w-2xl gap-4">
@@ -68,9 +76,9 @@ export default function TermsScreen() {
         </Section>
 
         <View className="pt-4">
-          <Link href="/login" className="text-blue-600 underline">
-            ← Back
-          </Link>
+          <Pressable onPress={onBack} testID="terms-back">
+            <Text className="text-blue-600 underline">← Back</Text>
+          </Pressable>
         </View>
       </View>
     </ScrollView>

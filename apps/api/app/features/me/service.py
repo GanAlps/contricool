@@ -20,6 +20,7 @@ from app.features.friends import repository as friends_repo
 from app.features.me import repository as me_repo
 from app.features.me.models import (
     EXPORT_COOLDOWN_SECONDS,
+    EXPORT_TRANSACTION_LIMIT,
     ExportResponse,
     FriendshipExport,
     MeProfile,
@@ -75,15 +76,12 @@ def delete_my_account(*, requester_id: str, requester_email: str) -> None:
 def export_my_data(*, requester_id: str) -> ExportResponse:
     """Build a JSON dump of the requester's data.
 
-    Rate-limited to 1 export per ``EXPORT_COOLDOWN_SECONDS``.
+    Rate-limited to 1 export per ``EXPORT_COOLDOWN_SECONDS``. The
+    user-existence check happens first so a forged token for a
+    non-existent user does not burn the rate-limit slot of an
+    unrelated DDB key (and so the caller gets the more informative
+    404 rather than 429-then-404 across two calls).
     """
-    try:
-        me_repo.consume_export_quota(
-            user_id=requester_id, cooldown_seconds=EXPORT_COOLDOWN_SECONDS
-        )
-    except me_repo.ExportTooSoonError as exc:
-        raise ExportRateLimitedError(retry_after=exc.retry_after) from exc
-
     profile_meta = friends_repo.get_user_meta(requester_id)
     if profile_meta is None:
         raise AuthError(
@@ -91,6 +89,13 @@ def export_my_data(*, requester_id: str) -> ExportResponse:
             http_status=404,
             message="No such user.",
         )
+
+    try:
+        me_repo.consume_export_quota(
+            user_id=requester_id, cooldown_seconds=EXPORT_COOLDOWN_SECONDS
+        )
+    except me_repo.ExportTooSoonError as exc:
+        raise ExportRateLimitedError(retry_after=exc.retry_after) from exc
     # The status field is on the META row directly; reuse the existing
     # repo's lower-level reader.
     raw_meta = friends_repo._table().get_item(
@@ -115,9 +120,11 @@ def export_my_data(*, requester_id: str) -> ExportResponse:
         for f in friendships_raw
     ]
 
-    # Transactions: list every TXN where the user is a member.
+    # Transactions: list every TXN where the user is a member, up
+    # to ``EXPORT_TRANSACTION_LIMIT``. The cap is disclosed in the
+    # privacy policy.
     txn_rows, _ = txn_repo.query_user_member_rows(
-        requester_id, limit=500, last_gsi1_sk=None
+        requester_id, limit=EXPORT_TRANSACTION_LIMIT, last_gsi1_sk=None
     )
     txn_ids = [tid for tid, _ in txn_rows]
     metas = txn_repo.batch_get_metas(txn_ids)

@@ -142,20 +142,18 @@ def test_export_unknown_user_returns_404(
 ) -> None:
     """Edge case: token claims a user_id that has no META row.
     Service raises NOT_FOUND so the requester can't conjure data
-    via a hand-rolled JWT.
-
-    Note: in practice a token always corresponds to a verified
-    user, but we defend against it.
+    via a hand-rolled JWT — and the existence check runs *before*
+    the rate-limit consume, so this 404 doesn't burn a quota slot.
     """
     resp = txn_client.get(
         "/v1/me/export", headers=auth_headers_for(A, "a@x.com")
     )
-    # 404 at the rate-limit step -> no, the rate-limit consumes
-    # before the user lookup. So actually we get rate-limit
-    # consumed + then NOT_FOUND. Re-check: rate-limit only writes
-    # to its own row, doesn't depend on the user existing. Then
-    # service tries to read the META row -> 404.
     assert resp.status_code == 404
+    # Rate-limit row was not written.
+    rate_row = txn_env["users_table"].get_item(  # type: ignore[attr-defined]
+        Key={"PK": f"USER#{A}", "SK": "EXPORT_RATE"}
+    ).get("Item")
+    assert rate_row is None
 
 
 def test_export_rate_limited_after_one(
