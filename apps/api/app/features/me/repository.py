@@ -126,6 +126,56 @@ def deactivate_user(user_id: str, *, email: str) -> DeactivationResult:
 # ---- Export rate-limit ---------------------------------------------
 
 
+class ProfileNotEditableError(Exception):
+    """Raised when ``update_user_name`` cannot apply because the META
+    row is missing or deactivated."""
+
+
+class ProfileNameBlankError(Exception):
+    """Raised when the supplied display name is blank after trim."""
+
+
+def update_user_name(*, user_id: str, name: str) -> str:
+    """Set ``display_name`` on the user's META row.
+
+    Trims whitespace, rejects blank, only writes when the META row
+    exists and the account is still active. Returns the persisted
+    (trimmed) name. The on-disk attribute is ``display_name`` to match
+    the rest of the codebase (``auth.service._put_user_meta``); the
+    on-the-wire shape calls it ``name``.
+    """
+    trimmed = name.strip()
+    if not trimmed:
+        raise ProfileNameBlankError("name must not be blank")
+    now_iso = _iso(_now())
+    try:
+        _table().update_item(
+            Key={"PK": f"USER#{user_id}", "SK": "META"},
+            UpdateExpression=(
+                "SET display_name = :name, updated_at = :now"
+            ),
+            ConditionExpression=(
+                "attribute_exists(PK) AND ("
+                "attribute_not_exists(#status) OR #status = :active"
+                ")"
+            ),
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={
+                ":name": trimmed,
+                ":now": now_iso,
+                ":active": "active",
+            },
+        )
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code == "ConditionalCheckFailedException":
+            raise ProfileNotEditableError(
+                "user not found or deactivated"
+            ) from exc
+        raise  # pragma: no cover - other DDB errors bubble
+    return trimmed
+
+
 _EXPORT_TTL_SECONDS = 30 * 86400  # generous; the row is informational
 
 
