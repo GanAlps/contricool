@@ -1,13 +1,14 @@
-"""Shared fixtures for friends-feature integration tests.
+"""Shared fixtures for transactions-feature integration tests.
 
-Spins up moto for cognito-idp + dynamodb, creates the Users table
-**with GSI1** (the friends list-merge needs it), seeds an
-``AppConfig``, and wires the feature-module table references.
+Spins up moto cognito + ddb, creates **both** the Users and Transactions
+tables (with GSI1 on each), seeds an ``AppConfig`` matching, wires
+every feature module's table refs, and yields a ``TestClient``.
 """
 from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import ExitStack
+from datetime import UTC, datetime
 from typing import Any
 
 import boto3
@@ -16,6 +17,7 @@ from fastapi.testclient import TestClient
 from moto import mock_aws
 
 from app.core import config
+from app.core import dependencies as deps
 from app.core.config import AppConfig
 from app.features.auth import cognito_client
 from app.features.auth import rate_limit as auth_rl
@@ -23,6 +25,7 @@ from app.features.auth import service as auth_svc
 from app.features.friends import rate_limit as friends_rl
 from app.features.friends import repository as friends_repo
 from app.features.transactions import repository as txn_repo
+from tests._jwt_helpers import base_id_claims, build_verifier, mint_token
 
 
 def _create_table_with_gsi1(ddb: Any, name: str) -> Any:
@@ -52,12 +55,8 @@ def _create_table_with_gsi1(ddb: Any, name: str) -> Any:
     )
 
 
-# Backward-compat alias used elsewhere in the file.
-_create_users_table_with_gsi1 = _create_table_with_gsi1
-
-
 @pytest.fixture
-def friends_env(aws_credentials: None) -> Iterator[dict[str, object]]:
+def txn_env(aws_credentials: None) -> Iterator[dict[str, object]]:
     with ExitStack() as stack:
         stack.enter_context(mock_aws())
 
@@ -92,11 +91,9 @@ def friends_env(aws_credentials: None) -> Iterator[dict[str, object]]:
         ddb = boto3.resource("dynamodb", region_name="us-west-2")
         _create_table_with_gsi1(ddb, "ContriCool-Users-test")
         users_table = ddb.Table("ContriCool-Users-test")
-        # Phase 4b — friends/balance now reads transactions; create the
-        # Transactions table so its query doesn't 500. Tests that don't
-        # seed any transactions still see net=0.
         _create_table_with_gsi1(ddb, "ContriCool-Transactions-test")
         transactions_table = ddb.Table("ContriCool-Transactions-test")
+        ddb_client = boto3.client("dynamodb", region_name="us-west-2")
 
         cfg = AppConfig(
             env_name="test",
@@ -117,18 +114,18 @@ def friends_env(aws_credentials: None) -> Iterator[dict[str, object]]:
         friends_repo._set_table_for_tests(users_table)
         friends_rl._set_table_for_tests(users_table)
         txn_repo._set_tables_for_tests(
-            users=users_table,
-            transactions=transactions_table,
-            client=boto3.client("dynamodb", region_name="us-west-2"),
+            users=users_table, transactions=transactions_table, client=ddb_client
         )
+        deps.set_verifier_for_tests(build_verifier())
 
         try:
             yield {
                 "pool_id": pool_id,
                 "client_id": client_id,
                 "cognito": cog,
-                "table": users_table,
+                "users_table": users_table,
                 "transactions_table": transactions_table,
+                "ddb_client": ddb_client,
                 "config": cfg,
             }
         finally:
@@ -140,6 +137,19 @@ def friends_env(aws_credentials: None) -> Iterator[dict[str, object]]:
             txn_repo._set_tables_for_tests(
                 users=None, transactions=None, client=None
             )
+            deps.set_verifier_for_tests(None)
+
+
+@pytest.fixture
+def txn_client(txn_env: dict[str, object]) -> Iterator[TestClient]:
+    from app.main import create_app
+
+    app = create_app(load_config=False)
+    with TestClient(app, raise_server_exceptions=False) as c:
+        yield c
+
+
+# ---- Seeders --------------------------------------------------------
 
 
 def seed_user(
@@ -150,18 +160,11 @@ def seed_user(
     name: str,
     currency: str = "USD",
 ) -> None:
-    """Write a META row + the GSI1 EMAIL-projection so lookups hit.
-
-    The shape mirrors production exactly (auth.service._create_user_meta_row):
-    ``GSI1SK = "USER#<user_id>"``.  An earlier shape (``GSI1SK = "USER"``)
-    diverged from production and let a real lookup bug ship — see
-    fix/friends-email-lookup-gsi1sk.
-    """
+    """Write META + GSI1 EMAIL projection."""
     from app.core.lookup_hash import email_hash
-    from app.features.friends.repository import now_iso
 
-    table = env["table"]
-    _, iso = now_iso()
+    table = env["users_table"]
+    now = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     table.put_item(  # type: ignore[attr-defined]
         Item={
             "PK": f"USER#{user_id}",
@@ -171,36 +174,32 @@ def seed_user(
             "display_name": name,
             "currency": currency,
             "status": "active",
-            "created_at": iso,
+            "created_at": now,
         }
     )
 
 
 def seed_friendship(
-    env: dict[str, object], *, a_id: str, b_id: str, created_by: str | None = None
+    env: dict[str, object], *, a_id: str, b_id: str
 ) -> None:
-    """Write a canonical-pair friendship row (test helper)."""
-    from app.features.friends.repository import now_iso
-
-    table = env["table"]
+    table = env["users_table"]
     min_id, max_id = (a_id, b_id) if a_id < b_id else (b_id, a_id)
-    _, now = now_iso()
+    now = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     table.put_item(  # type: ignore[attr-defined]
         Item={
             "PK": f"USER#{min_id}",
             "SK": f"FRIEND#{max_id}",
             "GSI1PK": f"USER#{max_id}",
             "GSI1SK": f"FRIEND#{min_id}",
-            "created_by": created_by or a_id,
+            "created_by": a_id,
             "created_at": now,
         }
     )
 
 
-@pytest.fixture
-def friends_client(friends_env: dict[str, object]) -> Iterator[TestClient]:
-    from app.main import create_app
-
-    app = create_app(load_config=False)
-    with TestClient(app, raise_server_exceptions=False) as c:
-        yield c
+def auth_headers_for(user_id: str, email: str = "u@example.com") -> dict[str, str]:
+    """Mint an id-token header for ``user_id``."""
+    token = mint_token(
+        base_id_claims(user_id=user_id, email=email, name=email.split("@")[0])
+    )
+    return {"Authorization": f"Bearer {token}"}

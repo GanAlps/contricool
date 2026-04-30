@@ -29,6 +29,7 @@ _PARAMETER_KEYS: dict[str, str] = {
     "cognito_ios_client_id":    "/contricool/{env}/cognito/client-id-ios",
     "cognito_android_client_id":"/contricool/{env}/cognito/client-id-android",
     "users_table_name":         "/contricool/{env}/ddb/users-table-name",
+    "transactions_table_name":  "/contricool/{env}/ddb/transactions-table-name",
     "pii_salt":                 "/contricool/{env}/pii-salt",
 }
 
@@ -45,6 +46,7 @@ class AppConfig:
     cognito_ios_client_id: str
     cognito_android_client_id: str
     users_table_name: str
+    transactions_table_name: str
     pii_salt: str
 
 

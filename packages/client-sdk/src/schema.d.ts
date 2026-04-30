@@ -232,6 +232,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Transactions Route */
+        get: operations["list_transactions_route_v1_transactions_get"];
+        put?: never;
+        /** Create Transaction Route */
+        post: operations["create_transaction_route_v1_transactions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/transactions/{txn_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Transaction Route */
+        get: operations["get_transaction_route_v1_transactions__txn_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -272,6 +307,48 @@ export interface components {
             since: string;
             /** User Id */
             user_id: string;
+        };
+        /**
+         * CreateTransactionRequest
+         * @description ``POST /v1/transactions`` request body.
+         *
+         *     Structural validation only here — per-method invariants are in
+         *     :func:`app.features.transactions.service.validate_create_payload`.
+         */
+        CreateTransactionRequest: {
+            /** Amount */
+            amount: number | string;
+            /**
+             * Currency
+             * @enum {string}
+             */
+            currency: "USD" | "INR";
+            /** Members */
+            members: components["schemas"]["MemberInput"][];
+            /** Name */
+            name: string;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /** Payers */
+            payers: components["schemas"]["PayerInput"][];
+            /**
+             * Split Method
+             * @enum {string}
+             */
+            split_method: "equal" | "amount" | "share" | "percent";
+            /**
+             * Txn Date
+             * Format: date
+             */
+            txn_date: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "expense" | "settlement";
         };
         /** ForgotPasswordRequest */
         ForgotPasswordRequest: {
@@ -363,6 +440,13 @@ export interface components {
             /** Next Cursor */
             next_cursor?: string | null;
         };
+        /** ListTransactionsResponse */
+        ListTransactionsResponse: {
+            /** Items */
+            items: components["schemas"]["TransactionListItem"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
         /** LoginRequest */
         LoginRequest: {
             /**
@@ -392,6 +476,51 @@ export interface components {
             currency: "USD" | "INR";
             /** Name */
             name: string;
+            /** User Id */
+            user_id: string;
+        };
+        /**
+         * Member
+         * @description One member, with the server-computed ``owed_amount``.
+         */
+        Member: {
+            /** Owed Amount */
+            owed_amount: string;
+            /** Percent */
+            percent?: string | null;
+            /** Share */
+            share?: string | null;
+            /** User Id */
+            user_id: string;
+        };
+        /**
+         * MemberInput
+         * @description One member entry on a create request.
+         */
+        MemberInput: {
+            /** Owed Amount */
+            owed_amount?: number | string | null;
+            /** Percent */
+            percent?: number | string | null;
+            /** Share */
+            share?: number | string | null;
+            /** User Id */
+            user_id: string;
+        };
+        /** Payer */
+        Payer: {
+            /** Paid Amount */
+            paid_amount: string;
+            /** User Id */
+            user_id: string;
+        };
+        /**
+         * PayerInput
+         * @description One payer entry on a create request.
+         */
+        PayerInput: {
+            /** Paid Amount */
+            paid_amount: number | string;
             /** User Id */
             user_id: string;
         };
@@ -467,6 +596,99 @@ export interface components {
             status: "PENDING_VERIFICATION";
             /** User Id */
             user_id: string;
+        };
+        /**
+         * Transaction
+         * @description ``POST /v1/transactions`` 201 + ``GET /v1/transactions/{id}`` 200.
+         */
+        Transaction: {
+            /** Amount */
+            amount: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Creator Id */
+            creator_id: string;
+            /**
+             * Currency
+             * @enum {string}
+             */
+            currency: "USD" | "INR";
+            /** Deleted At */
+            deleted_at?: string | null;
+            /** Members */
+            members: components["schemas"]["Member"][];
+            /** Name */
+            name: string;
+            /** Note */
+            note: string;
+            /** Payers */
+            payers: components["schemas"]["Payer"][];
+            /**
+             * Split Method
+             * @enum {string}
+             */
+            split_method: "equal" | "amount" | "share" | "percent";
+            /**
+             * Txn Date
+             * Format: date
+             */
+            txn_date: string;
+            /** Txn Id */
+            txn_id: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "expense" | "settlement";
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * TransactionListItem
+         * @description One row in ``GET /v1/transactions`` — META + the requester's owed.
+         */
+        TransactionListItem: {
+            /** Amount */
+            amount: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Creator Id */
+            creator_id: string;
+            /**
+             * Currency
+             * @enum {string}
+             */
+            currency: "USD" | "INR";
+            /** My Owed Amount */
+            my_owed_amount: string;
+            /** Name */
+            name: string;
+            /**
+             * Split Method
+             * @enum {string}
+             */
+            split_method: "equal" | "amount" | "share" | "percent";
+            /**
+             * Txn Date
+             * Format: date
+             */
+            txn_date: string;
+            /** Txn Id */
+            txn_id: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "expense" | "settlement";
         };
         /** ValidationError */
         ValidationError: {
@@ -891,6 +1113,105 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    list_transactions_route_v1_transactions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+                friend_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListTransactionsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_transaction_route_v1_transactions_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTransactionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Transaction"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_transaction_route_v1_transactions__txn_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                txn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Transaction"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -78,6 +78,7 @@ def _api_stack_auth_data_kwargs(
         "ios_client": auth.ios_client,
         "android_client": auth.android_client,
         "users_table": data.users_table,
+        "transactions_table": data.transactions_table,
     }
 
 
@@ -1325,16 +1326,17 @@ def test_api_stack_phase2c_lambda_iam_cognito_actions_enumerated(
 def test_api_stack_lambda_iam_ddb_actions_enumerated(
     cdk_env: cdk.Environment,
 ) -> None:
-    """Lambda IAM grants on the Users table cover the enumerated set —
-    no wildcards, no Scan, no BatchWriteItem (Phase 2c N32 + Phase 3a
-    additions)."""
+    """Lambda IAM grants are the union of (Phase 2c+3a Users actions)
+    + (Phase 4b ConditionCheckItem on Users + read/write set on
+    Transactions including TransactWriteItems). No wildcards, no Scan,
+    no BatchWriteItem ever."""
     import json
 
     template = _api_stack_template("dev", cdk_env)
     policies = template.find_resources("AWS::IAM::Policy")
     blob = json.dumps(list(policies.values()))
 
-    # Phase 2c required + Phase 3a additions.
+    # Phase 2c required + Phase 3a additions + Phase 4b additions.
     for action in (
         "dynamodb:GetItem",
         "dynamodb:PutItem",
@@ -1342,22 +1344,96 @@ def test_api_stack_lambda_iam_ddb_actions_enumerated(
         "dynamodb:Query",
         "dynamodb:BatchGetItem",
         "dynamodb:DeleteItem",
+        # Phase 4b — required on Users (friendship ConditionCheck) and
+        # on Transactions (idempotency ConditionCheck).
+        "dynamodb:ConditionCheckItem",
+        # Phase 4b — required for the cross-table create-transaction
+        # write spanning Users + Transactions.
+        "dynamodb:TransactWriteItems",
     ):
         assert action in blob, f"Lambda IAM missing required DDB action {action!r}"
 
-    # Forbidden actions — no wildcards, no Scan, no BatchWriteItem,
-    # no TransactWriteItems (canonical-pair Put with cond suffices),
-    # no ConditionCheckItem (only useful inside transactions).
+    # Forbidden actions — no wildcards, no Scan, no BatchWriteItem.
     for action in (
         "dynamodb:Scan",
         "dynamodb:BatchWriteItem",
-        "dynamodb:TransactWriteItems",
-        "dynamodb:ConditionCheckItem",
         '"dynamodb:*"',  # quoted to avoid matching enumerated actions
     ):
         assert action not in blob, (
-            f"Lambda IAM must NOT grant {action!r} on the Users table"
+            f"Lambda IAM must NOT grant {action!r}"
         )
+
+
+def test_api_stack_phase4b_transactions_table_grant_distinct(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Phase 4b — the Lambda's inline policy must reference *two*
+    distinct DDB table ARNs (Users + Transactions). The ApiStack
+    imports the tables from the upstream Data stack, so they appear
+    in the policy as cross-stack ARN tokens (parameters or
+    ``Fn::ImportValue``). Belt-and-braces against a future refactor
+    that points both ``.grant(...)`` calls at the same table.
+    """
+    import json
+
+    template = _api_stack_template("dev", cdk_env)
+    policies = template.find_resources("AWS::IAM::Policy")
+    # Find the Lambda's inline policy by the action enumeration.
+    lambda_policies = [
+        props
+        for props in policies.values()
+        if "dynamodb:TransactWriteItems"
+        in json.dumps(props["Properties"].get("PolicyDocument", {}))
+    ]
+    assert len(lambda_policies) == 1, (
+        f"Expected exactly one Lambda policy with TransactWriteItems; "
+        f"got {len(lambda_policies)}"
+    )
+    document = lambda_policies[0]["Properties"]["PolicyDocument"]
+    statements = document["Statement"]
+
+    # Collect every DDB-table-flavoured Resource entry. Two grant
+    # blocks (Users + Transactions); each emits a base ARN plus a
+    # ``/index/*`` peer, so we expect ≥ 2 distinct refs after dedup.
+    # The refs are CFN intrinsics; serialise to a string for set
+    # membership.
+    ddb_resource_strs: set[str] = set()
+    for st in statements:
+        actions = st.get("Action") or []
+        if isinstance(actions, str):
+            actions = [actions]
+        if not any(a.startswith("dynamodb:") for a in actions):
+            continue
+        resources = st.get("Resource") or []
+        if isinstance(resources, list):
+            for r in resources:
+                ddb_resource_strs.add(json.dumps(r, sort_keys=True))
+        else:
+            ddb_resource_strs.add(json.dumps(resources, sort_keys=True))
+
+    assert len(ddb_resource_strs) >= 2, (
+        f"Lambda policy should reference at least 2 distinct DDB "
+        f"table ARNs (Users + Transactions); got "
+        f"{len(ddb_resource_strs)}: {ddb_resource_strs}"
+    )
+
+
+def test_api_stack_phase4b_transactions_table_env_var_set(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Phase 4b — Lambda has TRANSACTIONS_TABLE_NAME env var."""
+    template = _api_stack_template("dev", cdk_env)
+    funcs = template.find_resources("AWS::Lambda::Function")
+    matching = [
+        f
+        for f in funcs.values()
+        if "contricool-api" in (f["Properties"].get("FunctionName") or "")
+    ]
+    assert len(matching) == 1, "Expected exactly one contricool-api Lambda"
+    env = matching[0]["Properties"].get("Environment", {}).get("Variables", {})
+    assert "TRANSACTIONS_TABLE_NAME" in env, (
+        f"Lambda env vars missing TRANSACTIONS_TABLE_NAME; have {sorted(env)}"
+    )
 
 
 def test_api_stack_phase3a_friends_add_throttled(

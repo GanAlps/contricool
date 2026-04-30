@@ -155,6 +155,7 @@ for env_name, cfg in ENV_CONFIGS.items():
         ios_client=auth.ios_client,
         android_client=auth.android_client,
         users_table=data.users_table,
+        transactions_table=data.transactions_table,
         reserved_concurrent_executions=cfg["api_reserved_concurrency"],
         prod_cmk=shared.prod_cmk if is_prod else None,
         app_version=APP_VERSION,

@@ -136,6 +136,7 @@ class ApiStack(Stack):
         ios_client: cognito.IUserPoolClient,
         android_client: cognito.IUserPoolClient,
         users_table: dynamodb.ITable,
+        transactions_table: dynamodb.ITable,
         reserved_concurrent_executions: int = 100,
         prod_cmk: kms.IKey | None = None,
         app_version: str = "0.0.1-dev",
@@ -177,6 +178,11 @@ class ApiStack(Stack):
                 "ENV_NAME": env_name,
                 "APP_VERSION": app_version,
                 "AWS_LAMBDA_EXEC_WRAPPER": "/opt/extensions/lambda-adapter",
+                # Phase 4b — exposed for the transactions feature so the
+                # repository can pick up the table name without a second
+                # SSM read on every cold start (the cold-start config
+                # loader still reads the SSM-backed name into AppConfig).
+                "TRANSACTIONS_TABLE_NAME": transactions_table.table_name,
             },
             log_group=log_group,
             tracing=lambda_.Tracing.ACTIVE,
@@ -231,6 +237,11 @@ class ApiStack(Stack):
         # ``DeleteItem`` (remove-friend). Canonical-pair friendship
         # insert uses ``PutItem`` with ``attribute_not_exists(PK)``
         # — single-item writes don't need TransactWriteItems.
+        #
+        # Phase 4b additions: ``ConditionCheckItem`` — required as a
+        # ``TransactWriteItems`` operand on the Users table when the
+        # transactions feature verifies friendship rows still exist
+        # at the moment of the create-transaction transact.
         users_table.grant(
             self.lambda_function,
             "dynamodb:GetItem",
@@ -239,6 +250,25 @@ class ApiStack(Stack):
             "dynamodb:Query",
             "dynamodb:BatchGetItem",
             "dynamodb:DeleteItem",
+            "dynamodb:ConditionCheckItem",
+        )
+
+        # Phase 4b — Transactions table grants. ``TransactWriteItems``
+        # is required for the create-transaction cross-table write
+        # spanning Users (friendship ConditionChecks) + Transactions
+        # (META + N MEMBERs + AUDIT + IDEMPOTENCY rows). No
+        # ``DeleteItem`` on this table — soft-delete is an
+        # ``UpdateItem`` (``deleted_at = now``); hard-delete is the
+        # Phase 6 cleanup-job's concern.
+        transactions_table.grant(
+            self.lambda_function,
+            "dynamodb:GetItem",
+            "dynamodb:PutItem",
+            "dynamodb:UpdateItem",
+            "dynamodb:Query",
+            "dynamodb:BatchGetItem",
+            "dynamodb:ConditionCheckItem",
+            "dynamodb:TransactWriteItems",
         )
 
         # X-Ray sampling rate is documented; concrete sampling rule lives in

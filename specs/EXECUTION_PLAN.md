@@ -379,7 +379,7 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 | Sub-phase | Scope | Spec |
 |---|---|---|
 | 4a | CDK Transactions DDB table (Data stack extension) | `specs/phase-4a-transactions-table/` |
-| 4b | Backend `transactions` feature (splits, balance, models, repository, service, routes, idempotency) — TBD |
+| 4b | Backend `transactions` feature (splits, balance, models, repository, service, routes, idempotency) | `specs/phase-4b-transactions-backend/` |
 | 4c | Frontend transaction UI (dashboard, list, new-txn form, detail) — TBD |
 
 ### 4a — Transactions DDB table (CDK Data stack)
@@ -390,13 +390,14 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 
 ### 4b — Backend `transactions` feature (`apps/api/app/features/transactions/`)
 
-- [ ] `splits.py` — `equal`, `amount`, `share`, `percent` algorithms; `Decimal` arithmetic; rounding-remainder absorption rules; **Hypothesis property tests** asserting `sum(owed_amount) == amount` for all valid inputs.
-- [ ] `balance.py` — pure-function pair balance computation.
-- [ ] `models.py` — Pydantic v2: `Transaction`, `TransactionMember`, `Payer`, request/response schemas.
-- [ ] `repository.py` — `TransactWriteItems` spanning Users (friendship ConditionChecks) + Transactions (META + MEMBER rows + AUDIT).
-- [ ] `service.py` — create (with friendship verification), get, list mine, list with friend (two GSI1 queries + intersection), balance.
-- [ ] `routes.py` — `POST /v1/transactions`, `GET /v1/transactions`, `GET /v1/transactions/{id}`, `GET /v1/transactions?friend_id=X`, `GET /v1/friends/{id}/balance` (now actually computes).
-- [ ] Idempotency via `aws-lambda-powertools.idempotency` decorator on `POST /v1/transactions`, backed by `IDEMPOTENCY#<user>#<key>` rows in Transactions table with 24h TTL.
+- [x] `splits.py` — `equal`, `amount`, `share`, `percent` algorithms; `Decimal` arithmetic; rounding-remainder absorption rules; **Hypothesis property tests** asserting `sum(owed_amount) == amount` for all valid inputs.
+- [x] `balance.py` — pure-function pair balance computation.
+- [x] `models.py` — Pydantic v2: `Transaction`, `TransactionMember`, `Payer`, request/response schemas.
+- [x] `repository.py` — `TransactWriteItems` spanning Users (friendship ConditionChecks) + Transactions (META + MEMBER rows + AUDIT + IDEMPOTENCY).
+- [x] `service.py` — create (with friendship verification), get, list mine, list with friend (two GSI1 queries + intersection), balance.
+- [x] `routes.py` — `POST /v1/transactions`, `GET /v1/transactions`, `GET /v1/transactions/{id}`, `GET /v1/transactions?friend_id=X`, `GET /v1/friends/{id}/balance` (now actually computes).
+- [x] Hand-rolled idempotency via the IDEMPOTENCY row in the same `TransactWriteItems` (chosen over the Powertools decorator so the idempotency record + the txn rows commit atomically — see `specs/phase-4b-transactions-backend/design.md`). 24h TTL via the `ttl` attribute.
+- [x] Spec at `specs/phase-4b-transactions-backend/`.
 
 ### 4c — Frontend transaction UI
 

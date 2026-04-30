@@ -36,6 +36,9 @@ def _seed_ssm(values: dict[str, str], *, env: str = "dev") -> None:
         f"/contricool/{env}/cognito/client-id-ios": "iosclient000000000000000",
         f"/contricool/{env}/cognito/client-id-android": "androidclient00000000000",
         f"/contricool/{env}/ddb/users-table-name": f"ContriCool-Users-{env}",
+        f"/contricool/{env}/ddb/transactions-table-name": (
+            f"ContriCool-Transactions-{env}"
+        ),
         f"/contricool/{env}/pii-salt": "deadbeef" * 8,  # 64-char hex
     }
     base.update(values)
@@ -61,6 +64,7 @@ def test_load_returns_app_config(
     assert cfg.cognito_ios_client_id == "iosclient000000000000000"
     assert cfg.cognito_android_client_id == "androidclient00000000000"
     assert cfg.users_table_name == "ContriCool-Users-dev"
+    assert cfg.transactions_table_name == "ContriCool-Transactions-dev"
     assert cfg.pii_salt == "deadbeef" * 8
 
 
@@ -117,6 +121,7 @@ def test_load_raises_on_empty_param(
             {"Name": "/contricool/dev/cognito/client-id-ios", "Value": "x"},
             {"Name": "/contricool/dev/cognito/client-id-android", "Value": "x"},
             {"Name": "/contricool/dev/ddb/users-table-name", "Value": "x"},
+            {"Name": "/contricool/dev/ddb/transactions-table-name", "Value": "x"},
             {"Name": "/contricool/dev/pii-salt", "Value": "x"},
         ],
         "InvalidParameters": [],
