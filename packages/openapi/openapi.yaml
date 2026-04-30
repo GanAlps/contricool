@@ -129,6 +129,32 @@ components:
       - payers
       title: CreateTransactionRequest
       type: object
+    ExportResponse:
+      description: '``GET /v1/me/export`` 200 response.'
+      properties:
+        exported_at:
+          format: date-time
+          title: Exported At
+          type: string
+        friendships:
+          items:
+            $ref: '#/components/schemas/FriendshipExport'
+          title: Friendships
+          type: array
+        profile:
+          $ref: '#/components/schemas/MeProfile'
+        transactions:
+          items:
+            $ref: '#/components/schemas/TransactionExport'
+          title: Transactions
+          type: array
+      required:
+      - profile
+      - friendships
+      - transactions
+      - exported_at
+      title: ExportResponse
+      type: object
     ForgotPasswordRequest:
       additionalProperties: false
       properties:
@@ -219,6 +245,21 @@ components:
       - currency
       - since
       title: FriendItem
+      type: object
+    FriendshipExport:
+      description: One friendship in the export.
+      properties:
+        friend_user_id:
+          title: Friend User Id
+          type: string
+        since:
+          format: date-time
+          title: Since
+          type: string
+      required:
+      - friend_user_id
+      - since
+      title: FriendshipExport
       type: object
     HTTPValidationError:
       properties:
@@ -340,6 +381,40 @@ components:
       - name
       - currency
       title: LoginUser
+      type: object
+    MeProfile:
+      description: 'Trimmed user profile on the export. Only the fields we own
+
+        server-side; raw email + phone come from Cognito and are not
+
+        re-exposed here.'
+      properties:
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        currency:
+          enum:
+          - USD
+          - INR
+          title: Currency
+          type: string
+        name:
+          title: Name
+          type: string
+        status:
+          title: Status
+          type: string
+        user_id:
+          title: User Id
+          type: string
+      required:
+      - user_id
+      - name
+      - currency
+      - status
+      - created_at
+      title: MeProfile
       type: object
     Member:
       description: One member, with the server-computed ``owed_amount``.
@@ -714,6 +789,88 @@ components:
       - created_at
       - updated_at
       title: Transaction
+      type: object
+    TransactionExport:
+      description: One transaction (META + members + payers) in the export.
+      properties:
+        amount:
+          title: Amount
+          type: string
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        creator_id:
+          title: Creator Id
+          type: string
+        currency:
+          enum:
+          - USD
+          - INR
+          title: Currency
+          type: string
+        deleted_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Deleted At
+        members:
+          items:
+            $ref: '#/components/schemas/Member'
+          title: Members
+          type: array
+        name:
+          title: Name
+          type: string
+        note:
+          title: Note
+          type: string
+        payers:
+          items:
+            $ref: '#/components/schemas/Payer'
+          title: Payers
+          type: array
+        split_method:
+          enum:
+          - equal
+          - amount
+          - share
+          - percent
+          title: Split Method
+          type: string
+        txn_date:
+          format: date
+          title: Txn Date
+          type: string
+        txn_id:
+          title: Txn Id
+          type: string
+        type:
+          enum:
+          - expense
+          - settlement
+          title: Type
+          type: string
+        updated_at:
+          format: date-time
+          title: Updated At
+          type: string
+      required:
+      - txn_id
+      - creator_id
+      - name
+      - type
+      - amount
+      - currency
+      - txn_date
+      - note
+      - split_method
+      - members
+      - payers
+      - created_at
+      - updated_at
+      title: TransactionExport
       type: object
     TransactionListItem:
       description: One row in ``GET /v1/transactions`` — META + the requester's owed.
@@ -1150,6 +1307,42 @@ paths:
       summary: Health
       tags:
       - health
+  /me:
+    delete:
+      description: 'Soft-deactivate the current user.
+
+
+        Idempotent: a second call still returns 204. Cognito disable +
+
+        global-sign-out fire on every call so a half-applied prior
+
+        attempt heals on retry.'
+      operationId: delete_my_account_route_v1_me_delete
+      responses:
+        '204':
+          description: Successful Response
+      summary: Delete My Account Route
+      tags:
+      - me
+  /me/export:
+    get:
+      description: 'JSON dump of the requester''s data.
+
+
+        Rate-limited to one export per 24 h per user; subsequent calls
+
+        return 429 ``RATE_LIMITED`` with ``retry_after`` in seconds.'
+      operationId: export_my_data_route_v1_me_export_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportResponse'
+          description: Successful Response
+      summary: Export My Data Route
+      tags:
+      - me
   /telemetry/error:
     post:
       description: 'Log a structured frontend telemetry event.

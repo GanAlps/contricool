@@ -227,6 +227,22 @@ export default function SignupScreen() {
             Sign in
           </Link>
         </View>
+        <View className="mt-3 flex-row justify-center gap-4">
+          <Link
+            testID="signup-privacy-link"
+            href="/privacy"
+            className="text-xs text-neutral-500 underline"
+          >
+            Privacy
+          </Link>
+          <Link
+            testID="signup-terms-link"
+            href="/terms"
+            className="text-xs text-neutral-500 underline"
+          >
+            Terms
+          </Link>
+        </View>
       </Card>
     </View>
   );
