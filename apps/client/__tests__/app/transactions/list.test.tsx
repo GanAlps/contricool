@@ -53,14 +53,14 @@ describe('TransactionsListScreen', () => {
     expect(screen.getByTestId('txns-empty-add')).toBeInTheDocument();
   });
 
-  it('renders a "With <friend>" chip when friend_id is in the URL', async () => {
-    setSearchParams({ friend_id: '01J0000000000000000000ALI' });
+  it('renders a chip per friend so the user can apply a filter', async () => {
     render(withProviders(<TransactionsListScreen />));
     await waitFor(() =>
       expect(
         screen.getByTestId('filter-chip-friend-01J0000000000000000000ALI'),
       ).toBeInTheDocument(),
     );
+    expect(screen.getByTestId('filter-chip-friend-01J0000000000000000000BOB')).toBeInTheDocument();
   });
 });
 
@@ -76,6 +76,38 @@ describe('TransactionsListScreen — interactions', () => {
     const { getRouterMock } = await import('../_router-mock');
     render(withProviders(<TransactionsListScreen />));
     fireEvent.click(screen.getByTestId('filter-chip-all'));
+    expect(
+      getRouterMock().calls.some((c) => c.kind === 'replace' && c.href === '/transactions'),
+    ).toBe(true);
+  });
+
+  it('navigates to /transactions?friend_id=<id> when a friend chip is tapped', async () => {
+    const { getRouterMock } = await import('../_router-mock');
+    render(withProviders(<TransactionsListScreen />));
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('filter-chip-friend-01J0000000000000000000ALI'),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByTestId('filter-chip-friend-01J0000000000000000000ALI'));
+    expect(
+      getRouterMock().calls.some(
+        (c) =>
+          c.kind === 'replace' && c.href === '/transactions?friend_id=01J0000000000000000000ALI',
+      ),
+    ).toBe(true);
+  });
+
+  it('toggles the active friend chip back to All when tapped a second time', async () => {
+    setSearchParams({ friend_id: '01J0000000000000000000ALI' });
+    const { getRouterMock } = await import('../_router-mock');
+    render(withProviders(<TransactionsListScreen />));
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('filter-chip-friend-01J0000000000000000000ALI'),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByTestId('filter-chip-friend-01J0000000000000000000ALI'));
     expect(
       getRouterMock().calls.some((c) => c.kind === 'replace' && c.href === '/transactions'),
     ).toBe(true);

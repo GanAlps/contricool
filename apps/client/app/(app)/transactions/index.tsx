@@ -35,22 +35,34 @@ export default function TransactionsListScreen() {
         </Button>
       </View>
 
-      <View className="mb-4 flex-row gap-2" testID="txns-filter-chips">
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerClassName="gap-2 pr-6"
+        className="mb-4"
+        testID="txns-filter-chips"
+      >
         <FilterChip
           testID="filter-chip-all"
           label="All"
           active={!friendId}
           onPress={() => router.replace('/transactions')}
         />
-        {friend ? (
-          <FilterChip
-            testID={`filter-chip-friend-${friend.user_id}`}
-            label={`With ${friend.name}`}
-            active
-            onPress={() => router.replace('/transactions')}
-          />
-        ) : null}
-      </View>
+        {(friends.data?.items ?? []).map((f) => {
+          const active = friendId === f.user_id;
+          return (
+            <FilterChip
+              key={f.user_id}
+              testID={`filter-chip-friend-${f.user_id}`}
+              label={f.name}
+              active={active}
+              onPress={() =>
+                router.replace(active ? '/transactions' : `/transactions?friend_id=${f.user_id}`)
+              }
+            />
+          );
+        })}
+      </ScrollView>
 
       {txns.isLoading ? (
         <View className="items-center py-8">
