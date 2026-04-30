@@ -23,6 +23,7 @@ from app.features.friends.cursor import (
     encode as encode_cursor,
 )
 from app.features.friends.errors import (
+    BalanceNotSettledError,
     ConflictError,
     InvalidCursorError,
     InvalidIdentifierError,
@@ -35,6 +36,7 @@ from app.features.friends.errors import (
 from app.features.friends.models import (
     AddFriendResponse,
     FriendBalanceResponse,
+    FriendBalanceSummary,
     FriendItem,
     ListFriendsResponse,
 )
@@ -192,6 +194,13 @@ def list_friends(
         )
 
     metas = repo.batch_get_user_metas([row.friend_user_id for row in page])
+    rendered_friend_ids = [
+        row.friend_user_id for row in page
+        if metas.get(row.friend_user_id) is not None
+    ]
+    balances = _compute_balances_for(
+        requester_id=requester_id, friend_ids=rendered_friend_ids
+    )
     items: list[FriendItem] = []
     for row in page:
         meta = metas.get(row.friend_user_id)
@@ -204,27 +213,85 @@ def list_friends(
                 extra={"requester_id": requester_id, "friend_id": row.friend_user_id},
             )
             continue
+        balance_summary = balances.get(row.friend_user_id)
         items.append(
             FriendItem(
                 user_id=row.friend_user_id,
                 name=meta.name,
                 currency=meta.currency,  # type: ignore[arg-type]
                 since=row.created_at,
+                balance=balance_summary,
             )
         )
     return ListFriendsResponse(items=items, next_cursor=next_cursor)
 
 
+def _compute_balances_for(
+    *, requester_id: str, friend_ids: list[str]
+) -> dict[str, FriendBalanceSummary]:
+    """Map ``friend_id -> FriendBalanceSummary`` for the list view.
+
+    Lazy import keeps the friends → transactions edge one-way at
+    module import time (matches the same trick in :func:`get_balance`).
+    """
+    from app.features.transactions import service as txn_service
+
+    raw = txn_service.compute_pair_balances_for(
+        requester_id=requester_id, friend_ids=friend_ids
+    )
+    return {
+        fid: FriendBalanceSummary(
+            net=result.net,
+            settlement_status=result.settlement_status,
+        )
+        for fid, result in raw.items()
+    }
+
+
 def remove_friend(*, requester_id: str, target_id: str) -> None:
-    """Hard-delete the canonical-pair friendship row."""
+    """Hard-delete the canonical-pair friendship row.
+
+    Refuses the removal when the requester and friend still have a
+    non-zero outstanding balance — the user must settle up first.
+    The balance check runs *before* the delete so a non-friend
+    receives the existing 404 (the balance lookup itself raises
+    :class:`UserNotFoundError` via :func:`_assert_zero_balance`).
+    """
     if target_id == requester_id:
         raise SelfActionForbiddenError()
+    if not repo.friendship_exists(requester_id, target_id):
+        raise UserNotFoundError()
+    _assert_zero_balance(requester_id=requester_id, target_id=target_id)
     if not repo.delete_friendship(requester_id, target_id):
         raise UserNotFoundError()
     logger.info(
         "friend_removed",
         extra={"requester_id": requester_id, "friend_id": target_id},
     )
+
+
+def _assert_zero_balance(*, requester_id: str, target_id: str) -> None:
+    """Raise :class:`BalanceNotSettledError` when the pair balance is
+    not within ±0.01 of zero.
+
+    Imported lazily to avoid a circular import: friends → transactions
+    → friends (the transactions feature reads friendship rows).
+    """
+    from app.features.transactions import service as txn_service
+
+    _net, status_, _last = txn_service.compute_pair_balance(
+        requester_id=requester_id, friend_id=target_id
+    )
+    if status_ != "settled":
+        logger.info(
+            "friend_remove_blocked_balance",
+            extra={
+                "requester_id": requester_id,
+                "friend_id": target_id,
+                "settlement_status": status_,
+            },
+        )
+        raise BalanceNotSettledError()
 
 
 def get_balance(

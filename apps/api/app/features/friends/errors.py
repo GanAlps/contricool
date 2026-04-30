@@ -97,6 +97,33 @@ class RateLimitedError(AuthError):
         )
 
 
+class BalanceNotSettledError(AuthError):
+    """``DELETE /v1/friends/{user_id}`` blocked because the requester
+    still has a non-zero balance with the friend.
+
+    409 because the friendship row still exists and the operation is
+    not retryable until the balance is settled — same shape as
+    :class:`ConflictError` but with a code that lets the client
+    render a precise toast.
+    """
+
+    def __init__(self, *, message: str | None = None) -> None:
+        super().__init__(
+            code="BALANCE_NOT_SETTLED",
+            http_status=409,
+            message=message
+            or "Settle the balance with this friend before removing them.",
+            details=[
+                {
+                    "field": "balance",
+                    "issue": (
+                        "outstanding balance with this friend must be zero"
+                    ),
+                }
+            ],
+        )
+
+
 class ValidationFailedError(AuthError):
     """Manual validation failure (e.g. non-ULID path param) that needs
     the same envelope shape as Pydantic's ``RequestValidationError``."""

@@ -21,7 +21,7 @@ from decimal import Decimal
 from typing import Any
 
 from app.core.observability import logger
-from app.features.transactions import balance, splits
+from app.features.transactions import balance, comments, splits
 from app.features.transactions import repository as repo
 from app.features.transactions.errors import (
     CurrencyMismatchError,
@@ -49,7 +49,9 @@ from app.features.transactions.models import (
     MIN_MEMBERS,
     PERCENT_TOLERANCE,
     SUM_TOLERANCE,
+    Comment,
     CreateTransactionRequest,
+    ListCommentsResponse,
     ListTransactionsResponse,
     Member,
     Payer,
@@ -521,6 +523,14 @@ def list_transactions(
             (mr.owed_amount for mr in member_rows if mr.user_id == requester_id),
             Decimal("0.00"),
         )
+        my_paid = sum(
+            (
+                Decimal(str(p["paid_amount"]))
+                for p in meta.payers
+                if str(p.get("user_id")) == requester_id
+            ),
+            Decimal("0.00"),
+        )
         from datetime import date as _date
 
         items.append(
@@ -534,6 +544,7 @@ def list_transactions(
                 split_method=meta.split_method,  # type: ignore[arg-type]
                 creator_id=meta.creator_id,
                 my_owed_amount=my_owed,
+                my_paid_amount=my_paid,
                 created_at=datetime.fromisoformat(
                     meta.created_at.replace("Z", "+00:00")
                 ),
@@ -543,6 +554,84 @@ def list_transactions(
 
 
 # ---- Balance -------------------------------------------------------
+
+
+def compute_pair_balances_for(
+    *, requester_id: str, friend_ids: list[str]
+) -> dict[str, balance.BalanceResult]:
+    """Compute the requester's balance with each friend in
+    ``friend_ids`` in a single pass.
+
+    The requester's MEMBER rows are fetched once and reused across all
+    friends. For each friend we still fetch their MEMBER rows (to
+    intersect on shared transactions) and the META + members for the
+    intersection. The cost is therefore O(F) DDB queries for F
+    friends — acceptable at MVP page sizes (<= 100).
+
+    Returns a dict keyed by friend_id. Friends with no shared
+    transactions get a zero-balance ``settled`` result.
+    """
+    if not friend_ids:
+        return {}
+    my_rows, _ = repo.query_user_member_rows(
+        requester_id, limit=500, last_gsi1_sk=None
+    )
+    my_txn_ids = {tid for tid, _ in my_rows}
+
+    results: dict[str, balance.BalanceResult] = {}
+    for friend_id in friend_ids:
+        # pragma: no cover - list_friends filters this out; defensive guard
+        if friend_id == requester_id:  # pragma: no cover
+            results[friend_id] = balance.BalanceResult(
+                net=Decimal("0.00"),
+                settlement_status="settled",
+                last_transaction_at=None,
+            )
+            continue
+        fr_rows, _ = repo.query_user_member_rows(
+            friend_id, limit=500, last_gsi1_sk=None
+        )
+        intersected = [
+            tid for (tid, _) in fr_rows if tid in my_txn_ids
+        ]
+        if not intersected:
+            results[friend_id] = balance.BalanceResult(
+                net=Decimal("0.00"),
+                settlement_status="settled",
+                last_transaction_at=None,
+            )
+            continue
+        metas = repo.batch_get_metas(intersected)
+        summaries: list[balance.TxnSummary] = []
+        for tid in intersected:
+            meta = metas.get(tid)
+            if meta is None or meta.deleted_at is not None:
+                continue
+            member_rows = repo.get_members(tid)
+            members_map: dict[str, Decimal] = {
+                mr.user_id: mr.owed_amount for mr in member_rows
+            }
+            payers = [
+                (str(p["user_id"]), Decimal(str(p["paid_amount"])))
+                for p in meta.payers
+            ]
+            created_at = datetime.fromisoformat(
+                meta.created_at.replace("Z", "+00:00")
+            )
+            summaries.append(
+                balance.TxnSummary(
+                    txn_id=meta.txn_id,
+                    amount=meta.amount,
+                    payers=payers,
+                    members=members_map,
+                    txn_date=meta.txn_date,
+                    created_at=created_at,
+                )
+            )
+        results[friend_id] = balance.compute_pair_balance(
+            my_id=requester_id, friend_id=friend_id, txns=summaries
+        )
+    return results
 
 
 def compute_pair_balance(
@@ -828,7 +917,130 @@ def update_transaction(
             "member_count": len(body.members),
         },
     )
+    _emit_system_edit_comment(
+        txn_id=txn_id,
+        prior_snapshot=prior_snapshot,
+        new_inputs={
+            "name": body.name,
+            "type": body.type,
+            "amount": body.amount,
+            "currency": body.currency,
+            "txn_date": body.txn_date.isoformat(),
+            "note": body.note,
+            "split_method": body.split_method,
+            "payers": payers_payload,
+            "member_ids": new_member_ids,
+        },
+    )
     return response
+
+
+def _emit_system_edit_comment(
+    *,
+    txn_id: str,
+    prior_snapshot: dict[str, Any],
+    new_inputs: dict[str, Any],
+) -> None:
+    """Append a SYSTEM comment summarising what changed.
+
+    Best-effort: we never let a comment-write failure roll back the
+    edit (the META update has already committed). The summary is
+    suppressed entirely for no-op edits — see
+    :func:`comments.build_edit_summary`.
+    """
+    # Snapshot stores ``member_ids`` indirectly inside ``members``; the
+    # diff helper expects a flat list.
+    prior_member_ids = [
+        str(m.get("user_id")) for m in (prior_snapshot.get("members") or [])
+    ]
+    summary = comments.build_edit_summary(
+        prior_snapshot={**prior_snapshot, "member_ids": prior_member_ids},
+        new_inputs=new_inputs,
+    )
+    if summary is None:
+        return
+    try:
+        repo.put_comment(
+            txn_id=txn_id,
+            comment_id=repo.new_comment_id(),
+            author_id=comments.SYSTEM_AUTHOR,
+            body=summary,
+            kind="system",
+        )
+    except Exception as exc:
+        logger.warning(
+            "system_comment_write_failed",
+            extra={"txn_id": txn_id, "error_type": type(exc).__name__},
+        )
+
+
+# ---- Comments ------------------------------------------------------
+
+
+def post_comment(
+    *, requester_id: str, txn_id: str, body: str
+) -> Comment:
+    """Create a user comment on a transaction.
+
+    - 404 (mask) to non-members.
+    - 422 ``VALIDATION_ERROR`` for blank body after trim (Pydantic
+      already rejects empty strings; we also reject whitespace-only).
+    """
+    trimmed = body.strip()
+    if not trimmed:
+        raise ValidationFailedError(
+            field="body", issue="must not be blank"
+        )
+    meta = repo.get_meta(txn_id)
+    if meta is None:
+        raise NotFoundError()
+    if requester_id not in meta.member_ids:
+        raise NotFoundError()
+    row = repo.put_comment(
+        txn_id=txn_id,
+        comment_id=repo.new_comment_id(),
+        author_id=requester_id,
+        body=trimmed,
+        kind="user",
+    )
+    return _row_to_comment(row)
+
+
+def list_comments(
+    *,
+    requester_id: str,
+    txn_id: str,
+    limit: int,
+    cursor: str | None,
+) -> ListCommentsResponse:
+    """Page through a transaction's comments, oldest-first."""
+    meta = repo.get_meta(txn_id)
+    if meta is None:
+        raise NotFoundError()
+    if requester_id not in meta.member_ids:
+        raise NotFoundError()
+    last_sk = f"COMMENT#{cursor}" if cursor else None
+    rows, next_sk = repo.query_comments(
+        txn_id, limit=limit, last_sk=last_sk
+    )
+    items = [_row_to_comment(r) for r in rows]
+    next_cursor = (
+        next_sk.removeprefix("COMMENT#") if next_sk else None
+    )
+    return ListCommentsResponse(items=items, next_cursor=next_cursor)
+
+
+def _row_to_comment(row: repo.CommentRow) -> Comment:
+    return Comment(
+        comment_id=row.comment_id,
+        txn_id=row.txn_id,
+        author_id=row.author_id,
+        body=row.body,
+        kind=row.kind,  # type: ignore[arg-type]
+        created_at=datetime.fromisoformat(
+            row.created_at.replace("Z", "+00:00")
+        ),
+    )
 
 
 def delete_transaction(*, requester_id: str, txn_id: str) -> None:

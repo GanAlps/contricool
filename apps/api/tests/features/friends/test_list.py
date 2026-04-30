@@ -158,7 +158,16 @@ def test_list_n15_no_email_or_phone_in_response(
     assert "@" not in payload_str  # No emails anywhere.
     assert "phone" not in payload_str.lower()
     for item in body["items"]:
-        assert set(item.keys()) == {"user_id", "name", "currency", "since"}
+        assert set(item.keys()) == {
+            "user_id",
+            "name",
+            "currency",
+            "since",
+            "balance",
+        }
+        # Each item carries a balance summary (zero when no shared txns).
+        assert item["balance"] is not None
+        assert set(item["balance"].keys()) == {"net", "settlement_status"}
 
 
 def test_list_unauthenticated(
@@ -166,6 +175,88 @@ def test_list_unauthenticated(
 ) -> None:
     r = friends_client.get("/v1/friends")
     assert r.status_code == 401
+
+
+def _post_simple_txn(
+    client: TestClient,
+    *,
+    payer: str,
+    payer_email: str,
+    other: str,
+    amount: str,
+    idem: str,
+) -> None:
+    body = {
+        "name": "Coffee",
+        "type": "expense",
+        "amount": amount,
+        "currency": "USD",
+        "txn_date": "2026-04-29",
+        "split_method": "equal",
+        "members": [{"user_id": payer}, {"user_id": other}],
+        "payers": [{"user_id": payer, "paid_amount": amount}],
+    }
+    token = mint_token(
+        base_id_claims(user_id=payer, email=payer_email, name="X")
+    )
+    resp = client.post(
+        "/v1/transactions",
+        json=body,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Idempotency-Key": idem,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+
+def test_list_carries_balance_summary_for_each_friend(
+    friends_client: TestClient,
+    friends_env: dict[str, object],
+    authed_headers: dict[str, str],
+) -> None:
+    """List response must reflect the actual pair balance with each
+    friend, not a hardcoded zero. Three friends seeded with three
+    distinct balance states: settled, friend_owes, you_owe."""
+    f_settled = "01HK3W7QF6VMYG8XR3DQ7B5N6Q"
+    f_owes_me = "01HK3W7QF6VMYG8XR3DQ7B5N6R"
+    f_i_owe = "01HK3W7QF6VMYG8XR3DQ7B5N6S"
+    seed_user(friends_env, user_id=REQUESTER_ID, email="r@example.com", name="R")
+    seed_user(friends_env, user_id=f_settled, email="s@example.com", name="Settled")
+    seed_user(friends_env, user_id=f_owes_me, email="o@example.com", name="OwesMe")
+    seed_user(friends_env, user_id=f_i_owe, email="i@example.com", name="IOwe")
+    seed_friendship(friends_env, a_id=REQUESTER_ID, b_id=f_settled)
+    seed_friendship(friends_env, a_id=REQUESTER_ID, b_id=f_owes_me)
+    seed_friendship(friends_env, a_id=REQUESTER_ID, b_id=f_i_owe)
+
+    # Requester paid 20, owes_me has 10 share — friend owes me 10.
+    _post_simple_txn(
+        friends_client,
+        payer=REQUESTER_ID,
+        payer_email="r@example.com",
+        other=f_owes_me,
+        amount="20.00",
+        idem="bal-1",
+    )
+    # i_owe paid 20, requester owes 10 share — I owe friend 10.
+    _post_simple_txn(
+        friends_client,
+        payer=f_i_owe,
+        payer_email="i@example.com",
+        other=REQUESTER_ID,
+        amount="20.00",
+        idem="bal-2",
+    )
+
+    r = friends_client.get("/v1/friends", headers=authed_headers)
+    assert r.status_code == 200
+    items = {item["user_id"]: item for item in r.json()["items"]}
+    assert items[f_settled]["balance"]["settlement_status"] == "settled"
+    assert items[f_settled]["balance"]["net"] == "0.00"
+    assert items[f_owes_me]["balance"]["settlement_status"] == "friend_owes"
+    assert items[f_owes_me]["balance"]["net"] == "10.00"
+    assert items[f_i_owe]["balance"]["settlement_status"] == "you_owe"
+    assert items[f_i_owe]["balance"]["net"] == "-10.00"
 
 
 def test_list_mixed_base_and_gsi1_sides(

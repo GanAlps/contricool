@@ -15,6 +15,16 @@ from pydantic import BaseModel, ConfigDict, Field
 Currency = Literal["USD", "INR"]
 
 
+SettlementStatus = Literal["settled", "friend_owes", "you_owe"]
+
+
+class FriendBalanceSummary(BaseModel):
+    """Compact pair-balance shape carried on each ``FriendItem``."""
+
+    net: Decimal
+    settlement_status: SettlementStatus
+
+
 class AddFriendRequest(BaseModel):
     """Payload for ``POST /v1/friends/add``.
 
@@ -34,12 +44,20 @@ class AddFriendRequest(BaseModel):
 
 
 class FriendItem(BaseModel):
-    """One row in the friends list — the friend's identity-safe shape."""
+    """One row in the friends list — the friend's identity-safe shape.
+
+    ``balance`` is the requester-perspective net balance with the
+    friend (sign convention matches :class:`FriendBalanceResponse`).
+    Optional only because :class:`AddFriendResponse` reuses this shape
+    on add — the add response doesn't compute a balance because it's
+    always zero on a freshly-created friendship.
+    """
 
     user_id: str
     name: str
     currency: Currency
     since: datetime
+    balance: FriendBalanceSummary | None = None
 
 
 class AddFriendResponse(FriendItem):
@@ -69,9 +87,6 @@ class ListFriendsQuery(BaseModel):
 
     limit: Annotated[int, Field(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT
     cursor: str | None = None
-
-
-SettlementStatus = Literal["settled", "friend_owes", "you_owe"]
 
 
 class FriendBalanceResponse(BaseModel):

@@ -56,7 +56,13 @@ Success → 200:
 ```json
 {
   "items": [
-    { "user_id": "...", "name": "...", "currency": "USD", "since": "..." }
+    {
+      "user_id": "...",
+      "name": "...",
+      "currency": "USD",
+      "since": "...",
+      "balance": { "net": "0.00", "settlement_status": "settled" }
+    }
   ],
   "next_cursor": "<opaque>" | null
 }
@@ -67,10 +73,18 @@ when the list is exhausted. The cursor is HMAC-signed and bound to
 the requester's user_id at issue time — a cursor minted for User A
 presented by User B → 422 `INVALID_CURSOR`.
 
+Each item carries a `balance` summary: the requester-perspective net
+balance with that friend (`net > 0` → friend owes you, `< 0` → you
+owe). The list endpoint computes balances in a single pass over the
+requester's transactions, so this is one round-trip rather than `N`
+balance queries.
+
 ### `DELETE /v1/friends/{user_id}`
 
 Hard-delete the canonical-pair friendship. Idempotent re-call returns
-`404 USER_NOT_FOUND`.
+`404 USER_NOT_FOUND`. **Refuses with `409 BALANCE_NOT_SETTLED`** when
+the requester still has a non-zero balance with the friend — the user
+must settle up before removing them.
 
 ### `GET /v1/friends/{user_id}/balance`
 
