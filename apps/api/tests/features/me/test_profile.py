@@ -11,10 +11,27 @@ from tests.features.transactions.conftest import (
 A = "01HK3W7QF6VMYG8XR3DQ7B5N6P"
 
 
+def _seed_cognito_user(env: dict[str, object], email: str, name: str = "Alice") -> None:
+    """Pre-create a Cognito user so admin_update_user_attributes has a
+    target to mirror to."""
+    cog = env["cognito"]
+    cog.admin_create_user(  # type: ignore[attr-defined]
+        UserPoolId=str(env["pool_id"]),
+        Username=email,
+        UserAttributes=[
+            {"Name": "email", "Value": email},
+            {"Name": "email_verified", "Value": "true"},
+            {"Name": "name", "Value": name},
+        ],
+        MessageAction="SUPPRESS",
+    )
+
+
 def test_update_profile_changes_name(
     txn_env: dict[str, object], txn_client: TestClient
 ) -> None:
     seed_user(txn_env, user_id=A, email="a@x.com", name="Alice")
+    _seed_cognito_user(txn_env, "a@x.com")
     r = txn_client.patch(
         "/v1/me/profile",
         json={"name": "Alicia"},
@@ -25,6 +42,49 @@ def test_update_profile_changes_name(
     assert body == {"user_id": A, "name": "Alicia", "currency": "USD"}
 
     # META row reflects the new name (stored as display_name on disk).
+    item = txn_env["users_table"].get_item(  # type: ignore[attr-defined]
+        Key={"PK": f"USER#{A}", "SK": "META"}
+    ).get("Item")
+    assert item is not None
+    assert item.get("display_name") == "Alicia"
+
+    # Cognito user attributes mirror the new name so the next ID-token
+    # refresh carries it (otherwise the local store reverts mid-session).
+    cog = txn_env["cognito"]
+    user = cog.admin_get_user(  # type: ignore[attr-defined]
+        UserPoolId=str(txn_env["pool_id"]), Username="a@x.com"
+    )
+    cognito_name = next(
+        (a["Value"] for a in user["UserAttributes"] if a["Name"] == "name"),
+        None,
+    )
+    assert cognito_name == "Alicia"
+
+
+def test_update_profile_succeeds_when_cognito_mirror_fails(
+    txn_env: dict[str, object], txn_client: TestClient, monkeypatch
+) -> None:
+    """Mirror is best-effort: a Cognito failure must not roll back the
+    successful DDB update."""
+    seed_user(txn_env, user_id=A, email="a@x.com", name="Alice")
+    # Don't create a Cognito user — the mirror will hit
+    # ``UserNotFoundException`` (which the wrapper tolerates by no-op);
+    # additionally monkey-patch the call to raise to exercise the
+    # service-level except.
+    from app.features.auth import cognito_client as cog_module
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("synthetic cognito mirror failure")
+
+    monkeypatch.setattr(
+        cog_module.CognitoClient, "admin_update_user_attributes", _boom
+    )
+    r = txn_client.patch(
+        "/v1/me/profile",
+        json={"name": "Alicia"},
+        headers=auth_headers_for(A, "a@x.com"),
+    )
+    assert r.status_code == 200, r.text
     item = txn_env["users_table"].get_item(  # type: ignore[attr-defined]
         Key={"PK": f"USER#{A}", "SK": "META"}
     ).get("Item")

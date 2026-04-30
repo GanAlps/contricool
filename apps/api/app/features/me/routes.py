@@ -51,7 +51,9 @@ def update_my_profile_route(
     extra body field is rejected (Pydantic ``extra="forbid"``).
     """
     return service.update_my_profile(
-        requester_id=principal.user_id, body=body
+        requester_id=principal.user_id,
+        requester_email=principal.email,
+        body=body,
     )
 
 

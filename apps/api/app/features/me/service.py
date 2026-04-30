@@ -48,13 +48,24 @@ class ExportRateLimitedError(AuthError):
 
 
 def update_my_profile(
-    *, requester_id: str, body: UpdateProfileRequest
+    *,
+    requester_id: str,
+    requester_email: str,
+    body: UpdateProfileRequest,
 ) -> MeProfileSlim:
     """Update the requester's display name on their META row.
 
     Email and currency are not editable through this surface. A blank
     name (after trim) raises 422 ``VALIDATION_ERROR``. A missing /
     deactivated META row raises 403 ``NOT_ALLOWED``.
+
+    Mirrors the new name back to the Cognito ``name`` user attribute
+    so the next ID-token refresh carries the updated value (the SDK
+    middleware decodes ``name`` from the JWT to populate the client
+    auth store, so without this the in-session name silently reverts
+    on the next refresh). The mirror is best-effort and runs *after*
+    the DDB write — a Cognito error logs but does not roll back the
+    successful META update.
     """
     try:
         new_name = me_repo.update_user_name(user_id=requester_id, name=body.name)
@@ -80,6 +91,22 @@ def update_my_profile(
             http_status=404,
             message="No such user.",
         )
+
+    try:
+        cognito_client.CognitoClient(
+            user_pool_id=config.load().cognito_user_pool_id
+        ).admin_update_user_attributes(
+            email=requester_email, attributes={"name": new_name}
+        )
+    except Exception as exc:
+        logger.warning(
+            "me_profile_cognito_mirror_failed",
+            extra={
+                "user_id": requester_id,
+                "error_type": type(exc).__name__,
+            },
+        )
+
     logger.info(
         "me_profile_updated", extra={"user_id": requester_id}
     )

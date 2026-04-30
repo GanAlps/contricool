@@ -310,6 +310,35 @@ class CognitoClient:
 
     # ----- Admin lifecycle (Phase 7 — account deletion) -----
 
+    def admin_update_user_attributes(
+        self, *, email: str, attributes: dict[str, str]
+    ) -> None:
+        """Patch user attributes server-side.
+
+        Used by the profile update path to mirror the new display
+        ``name`` back to Cognito so the next ID-token refresh carries
+        the updated value (the SDK middleware decodes ``name`` from the
+        JWT to populate the client auth store).
+
+        Tolerates ``UserNotFoundException`` so a profile update that
+        races with an account deletion does not 500.
+        """
+        try:
+            _client().admin_update_user_attributes(
+                UserPoolId=self._user_pool_id,
+                Username=_normalise(email),
+                UserAttributes=[
+                    {"Name": k, "Value": v} for k, v in attributes.items()
+                ],
+            )
+        except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "")
+            if code == "UserNotFoundException":  # pragma: no cover - defensive
+                return
+            raise _map_error(  # pragma: no cover - defensive: other Cognito errors map to 500
+                e, path="admin_update_user_attributes"
+            ) from e
+
     def admin_disable_user(self, *, email: str) -> None:
         """Mark a Cognito user as disabled. Existing access tokens
         keep working until expiry (~1 h) but new ``InitiateAuth``
