@@ -149,13 +149,35 @@ def _path_aware_user_not_found(path: str) -> AuthError:
 
 def _map_error(exc: ClientError, *, path: str) -> AuthError:
     code = exc.response.get("Error", {}).get("Code", "")
+    message = str(exc.response.get("Error", {}).get("Message", "") or "")
     if code == "NotAuthorizedException":
         return _path_aware_not_authorized(path)
     if code == "UserNotFoundException":
         return _path_aware_user_not_found(path)
+    if code == "InvalidParameterException" and path == "reset_password":
+        # Cognito raises InvalidParameterException for two distinct
+        # cases on this path: same-as-current password ("Password
+        # should differ from previous password") and other malformed
+        # password input. The default _FIXED_MAP entry maps it to a
+        # 409 ALREADY_CONFIRMED, which is correct only for the resend
+        # path — emit the right code here instead.
+        if _is_password_reuse_message(message):
+            return AuthError(
+                code="PASSWORD_REUSED",
+                http_status=422,
+                message=(
+                    "New password must be different from your "
+                    "current password."
+                ),
+            )
+        return AuthError(
+            code="INVALID_PASSWORD",
+            http_status=422,
+            message="Password does not meet requirements.",
+        )
     if code in _FIXED_MAP:
-        new_code, http_status, message = _FIXED_MAP[code]
-        return AuthError(code=new_code, http_status=http_status, message=message)
+        new_code, http_status, fixed_message = _FIXED_MAP[code]
+        return AuthError(code=new_code, http_status=http_status, message=fixed_message)
     # Any other Cognito error is a server-side problem — don't leak
     # internals. Caller-side logger records ``cognito_error_type=code``.
     return AuthError(
@@ -163,6 +185,18 @@ def _map_error(exc: ClientError, *, path: str) -> AuthError:
         http_status=500,
         message="An internal error occurred.",
     )
+
+
+def _is_password_reuse_message(message: str) -> bool:
+    """Detect Cognito's "same as previous password" hint.
+
+    Cognito's exact text varies slightly across regions / versions but
+    consistently mentions a "previous" / "different" / "differ" word
+    pair. Lowercase substring match keeps this robust without
+    hardcoding a brittle full string.
+    """
+    lower = message.lower()
+    return "previous password" in lower or "differ" in lower
 
 
 # ---- Public client surface ------------------------------------------

@@ -15,7 +15,7 @@ Pool (Phase 2a) + the Users DynamoDB table (Phase 2a) + the shared
 | `POST` | `/v1/auth/refresh` | cookie | Read `rt` cookie, return new access + id tokens. |
 | `POST` | `/v1/auth/logout` | **id-token JWT + `X-Cognito-Access-Token`** | Revoke all refresh tokens via Cognito `GlobalSignOut`; clears the `rt` cookie. See "Token shape on authenticated routes" below. |
 | `POST` | `/v1/auth/forgot-password` | none | Send password-reset code (rate-limited; shares cap with `resend-email-code`). |
-| `POST` | `/v1/auth/reset-password` | none | Confirm new password with the emailed code. |
+| `POST` | `/v1/auth/reset-password` | none | Confirm new password with the emailed code. Returns `422 PASSWORD_REUSED` when the new password matches the user's current password (Cognito disallows the reuse). |
 
 ## Token shape on authenticated routes
 
