@@ -39,11 +39,19 @@ The Phase 5 follow-up. Composes:
   META + MEMBER rows after 30 d; mark AUDIT rows with 90 d TTL.
 - **Deactivated accounts** (new) — for users with
   `status = deactivated` and `deactivated_at < now - 30d`:
-  1. Hard-delete the Users META row + the email-hash GSI projection.
-  2. Anonymize the user's appearance in any remaining transactions
-     (replace `user_id` with `DELETED#<random>`, drop `name` from
-     audit snapshots).
-  3. `AdminDeleteUser` in Cognito.
+  1. Hard-delete every friendship row touching the user
+     (canonical-pair PK/SK).
+  2. Hard-delete the Users META row + the email-hash GSI projection
+     (the projection is the same row).
+  3. `AdminDeleteUser` in Cognito so the email can be re-registered.
+
+  Transaction MEMBER rows are deliberately **not** anonymized: they
+  carry only `user_id` (an opaque ULID), never PII. Surviving
+  members of a shared transaction continue to see the deleted
+  user's ULID, which the UI renders as `—` because
+  `friends_repo.get_user_meta` returns `None`. The friendship-row
+  delete is what makes the deleted user fall out of every surviving
+  user's friend list.
 - **CDK construct**:
   - `lambda_python_alpha.PythonFunction` (zip-packaged, separate
     from the API container).

@@ -1,9 +1,17 @@
-import { Link } from 'expo-router';
-import { ScrollView, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 
 const EFFECTIVE = '2026-04-29';
 
 export default function PrivacyScreen() {
+  const router = useRouter();
+  const onBack = (): void => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/login');
+    }
+  };
   return (
     <ScrollView className="flex-1 bg-neutral-50" contentContainerClassName="p-6">
       <View className="mx-auto w-full max-w-2xl gap-4">
@@ -43,12 +51,17 @@ export default function PrivacyScreen() {
         <Section title="Your rights">
           You can export all of your data from{' '}
           <Text className="font-medium">Settings → Export my data</Text> (rate-limited to one per
-          day).{'\n'}You can delete your account from{' '}
-          <Text className="font-medium">Settings → Delete my account</Text>. Deletion is immediate
-          from your perspective; the underlying data is hard-deleted after a 30-day window so the
-          action remains reversible by support if you change your mind.{'\n'}California residents
-          (CCPA) and India residents (DPDP Act 2023) have additional rights to access, correct, and
-          delete personal data. Email <Text className="font-medium">support@contricool.app</Text> to
+          day). Each export contains your most-recent 500 transactions; if you have more, request
+          another export after the cooldown — full data is always available on request via{' '}
+          <Text className="font-medium">support@contricool.app</Text>.{'\n'}You can delete your
+          account from <Text className="font-medium">Settings → Delete my account</Text>. Deletion
+          is immediate from your perspective. Your profile, friend graph, and Cognito identity are
+          hard-deleted after a 30-day window so the action remains reversible by support if you
+          change your mind. Transactions you shared with other users keep your opaque internal
+          user-ID on the membership row (no email, name, or phone) so the other parties' history
+          stays intact — the UI renders the missing user as "—".{'\n'}California residents (CCPA)
+          and India residents (DPDP Act 2023) have additional rights to access, correct, and delete
+          personal data. Email <Text className="font-medium">support@contricool.app</Text> to
           exercise them outside of the in-app controls.
         </Section>
 
@@ -68,9 +81,9 @@ export default function PrivacyScreen() {
         </Section>
 
         <View className="pt-4">
-          <Link href="/login" className="text-blue-600 underline">
-            ← Back
-          </Link>
+          <Pressable onPress={onBack} testID="privacy-back">
+            <Text className="text-blue-600 underline">← Back</Text>
+          </Pressable>
         </View>
       </View>
     </ScrollView>

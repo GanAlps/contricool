@@ -282,7 +282,10 @@ class CognitoClient:
         attempts return ``NotAuthorizedException``.
 
         Idempotent: calling on an already-disabled user is a no-op
-        and returns success.
+        and returns success. Tolerates ``UserNotFoundException`` so a
+        late ``DELETE /v1/me`` after the cleanup Lambda has already
+        removed the Cognito user still returns 204 (the user is gone
+        in Cognito; that *is* the post-condition we want).
         """
         try:
             _client().admin_disable_user(
@@ -290,12 +293,18 @@ class CognitoClient:
                 Username=_normalise(email),
             )
         except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "")
+            if code == "UserNotFoundException":
+                return
             raise _map_error(e, path="admin_disable_user") from e
 
     def admin_user_global_sign_out(self, *, email: str) -> None:
         """Revoke every refresh token for a user. Pairs with
         ``admin_disable_user`` so a deactivated account can't ride
         an existing refresh token to keep working past disable.
+
+        Tolerates ``UserNotFoundException`` for the same reason as
+        ``admin_disable_user``.
         """
         try:
             _client().admin_user_global_sign_out(
@@ -303,6 +312,9 @@ class CognitoClient:
                 Username=_normalise(email),
             )
         except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "")
+            if code == "UserNotFoundException":
+                return
             raise _map_error(e, path="admin_user_global_sign_out") from e
 
     def admin_delete_user(self, *, email: str) -> None:

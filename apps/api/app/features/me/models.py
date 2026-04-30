@@ -74,6 +74,14 @@ class ExportResponse(BaseModel):
 # table with a new ``EXPORT_RATE`` row class (one per user).
 EXPORT_COOLDOWN_SECONDS: Annotated[int, Field(gt=0)] = 24 * 3600
 
+# Hard cap on transactions returned in a single export. We expect
+# real users to be far under this; the cap exists so a single export
+# can never blow Lambda memory or the 6 MB API Gateway payload limit.
+# If a user genuinely needs more, they can request again after the
+# cooldown — the export is paginated by recency, oldest-truncated
+# per ``query_user_member_rows`` ordering.
+EXPORT_TRANSACTION_LIMIT: Annotated[int, Field(gt=0)] = 500
+
 
 class DeactivationAck(BaseModel):
     """Internal — not surfaced on the wire (the route returns 204)

@@ -24,8 +24,13 @@ export default function SettingsScreen() {
   const onExport = async (): Promise<void> => {
     try {
       const data = await exportMutation.mutateAsync();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       if (Platform.OS === 'web') {
+        // Blob and URL.createObjectURL are web-only globals; React
+        // Native (Hermes) does not provide them, so construct the
+        // download artefacts only inside the web branch.
+        const blob = new Blob([JSON.stringify(data, null, 2)], {
+          type: 'application/json',
+        });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;

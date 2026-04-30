@@ -571,12 +571,13 @@ def test_admin_disable_user_succeeds(
     assert raw["Enabled"] is False
 
 
-def test_admin_disable_user_unknown_maps_to_404(
+def test_admin_disable_user_unknown_is_idempotent(
     cognito: cc.CognitoClient,
 ) -> None:
-    with pytest.raises(AuthError) as ei:
-        cognito.admin_disable_user(email="ghost@example.com")
-    assert ei.value.http_status == 404
+    """If the cleanup Lambda has already removed the Cognito user,
+    a late ``DELETE /v1/me`` must still succeed (the user is gone in
+    Cognito; that's the desired post-condition)."""
+    cognito.admin_disable_user(email="ghost@example.com")  # no raise
 
 
 def test_admin_user_global_sign_out_succeeds(
@@ -587,12 +588,11 @@ def test_admin_user_global_sign_out_succeeds(
     cognito.admin_user_global_sign_out(email="alice@example.com")
 
 
-def test_admin_user_global_sign_out_unknown_maps_to_404(
+def test_admin_user_global_sign_out_unknown_is_idempotent(
     cognito: cc.CognitoClient,
 ) -> None:
-    with pytest.raises(AuthError) as ei:
-        cognito.admin_user_global_sign_out(email="ghost@example.com")
-    assert ei.value.http_status == 404
+    """Same idempotency contract as ``admin_disable_user``."""
+    cognito.admin_user_global_sign_out(email="ghost@example.com")  # no raise
 
 
 def test_admin_delete_user_succeeds(
@@ -633,6 +633,46 @@ def test_admin_delete_user_other_error_propagates(
     monkeypatch.setattr(cc, "_default_client", _Stub())
     with pytest.raises(AuthError):
         cognito.admin_delete_user(email="alice@example.com")
+    cc._set_client_for_tests(None)
+
+
+def test_admin_disable_user_other_error_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+    cognito: cc.CognitoClient,
+) -> None:
+    """A non-UserNotFound ClientError on disable must propagate."""
+    fake_err = ClientError(
+        {"Error": {"Code": "InternalError", "Message": "boom"}},
+        "AdminDisableUser",
+    )
+
+    class _Stub:
+        def admin_disable_user(self, **_: Any) -> None:
+            raise fake_err
+
+    monkeypatch.setattr(cc, "_default_client", _Stub())
+    with pytest.raises(AuthError):
+        cognito.admin_disable_user(email="alice@example.com")
+    cc._set_client_for_tests(None)
+
+
+def test_admin_user_global_sign_out_other_error_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+    cognito: cc.CognitoClient,
+) -> None:
+    """A non-UserNotFound ClientError on global-sign-out must propagate."""
+    fake_err = ClientError(
+        {"Error": {"Code": "InternalError", "Message": "boom"}},
+        "AdminUserGlobalSignOut",
+    )
+
+    class _Stub:
+        def admin_user_global_sign_out(self, **_: Any) -> None:
+            raise fake_err
+
+    monkeypatch.setattr(cc, "_default_client", _Stub())
+    with pytest.raises(AuthError):
+        cognito.admin_user_global_sign_out(email="alice@example.com")
     cc._set_client_for_tests(None)
 
 
