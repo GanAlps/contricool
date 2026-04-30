@@ -9,14 +9,19 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import type { Comment, ListCommentsResponse } from '@contricool/client-sdk';
+
 import { apiClient } from '~/lib/api';
 import { friendsKeys } from '~/lib/queries/friends';
 import type { CreateTransactionRequest, ListTransactionsResponse, Transaction } from '~/lib/types';
+
+export type { Comment, ListCommentsResponse } from '@contricool/client-sdk';
 
 export const transactionsKeys = {
   all: ['transactions'] as const,
   list: (q: ListTransactionsArgs) => ['transactions', q] as const,
   one: (txnId: string) => ['transaction', txnId] as const,
+  comments: (txnId: string) => ['transaction-comments', txnId] as const,
 };
 
 const DEFAULT_LIST_LIMIT = 20;
@@ -141,6 +146,38 @@ export function useDeleteTransaction() {
       for (const uid of vars.involvedMemberIds) {
         qc.invalidateQueries({ queryKey: friendsKeys.balance(uid) });
       }
+    },
+  });
+}
+
+export function useTransactionComments(txnId: string) {
+  return useQuery<ListCommentsResponse>({
+    queryKey: transactionsKeys.comments(txnId),
+    queryFn: async () => {
+      const r = await apiClient.GET('/transactions/{txn_id}/comments', {
+        params: { path: { txn_id: txnId } },
+      });
+      return r.data as ListCommentsResponse;
+    },
+    enabled: Boolean(txnId),
+    staleTime: 10_000,
+  });
+}
+
+export type PostCommentArgs = { txnId: string; body: string };
+
+export function usePostComment() {
+  const qc = useQueryClient();
+  return useMutation<Comment, Error, PostCommentArgs>({
+    mutationFn: async ({ txnId, body }) => {
+      const r = await apiClient.POST('/transactions/{txn_id}/comments', {
+        params: { path: { txn_id: txnId } },
+        body: { body },
+      });
+      return r.data as Comment;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: transactionsKeys.comments(vars.txnId) });
     },
   });
 }

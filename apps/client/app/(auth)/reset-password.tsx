@@ -23,6 +23,7 @@ import { ResetPasswordSchema, type ResetPasswordValues } from '~/lib/schemas';
 
 const FRIENDLY = {
   INVALID_CODE: 'Code is wrong or expired.',
+  PASSWORD_REUSED: 'New password must be different from your current password.',
 } as const;
 
 export default function ResetPasswordScreen() {

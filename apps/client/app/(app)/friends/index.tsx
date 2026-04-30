@@ -69,7 +69,7 @@ export default function FriendsListScreen() {
                 <Text className="text-base font-medium text-neutral-900">{f.name}</Text>
                 <Text className="text-xs text-neutral-500">{f.currency}</Text>
               </View>
-              <Text className="text-sm text-neutral-700">Settled</Text>
+              <FriendBalanceLabel friend={f} />
             </Pressable>
           ))}
         </View>
@@ -84,6 +84,38 @@ export default function FriendsListScreen() {
         }}
       />
     </View>
+  );
+}
+
+function FriendBalanceLabel({ friend }: { friend: FriendItem }) {
+  const balance = friend.balance ?? null;
+  if (!balance || balance.settlement_status === 'settled') {
+    return (
+      <Text testID={`friend-balance-${friend.user_id}`} className="text-sm text-neutral-700">
+        Settled
+      </Text>
+    );
+  }
+  // Server's net is requester-perspective: positive → friend owes me,
+  // negative → I owe friend. Strip the sign before rendering.
+  const abs = Math.abs(Number(balance.net)).toFixed(2);
+  if (balance.settlement_status === 'friend_owes') {
+    return (
+      <Text
+        testID={`friend-balance-${friend.user_id}`}
+        className="text-sm font-medium text-success-700"
+      >
+        Owes you {abs} {friend.currency}
+      </Text>
+    );
+  }
+  return (
+    <Text
+      testID={`friend-balance-${friend.user_id}`}
+      className="text-sm font-medium text-danger-700"
+    >
+      You owe {abs} {friend.currency}
+    </Text>
   );
 }
 

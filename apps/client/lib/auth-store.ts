@@ -25,6 +25,8 @@ export type AuthState = {
   refreshSession: () => Promise<void>;
   /** Phase 2e: SDK middleware calls this after a successful refresh. */
   _setTokensFromRefresh: (accessToken: string, idToken: string) => void;
+  /** Patch the cached user (e.g. after a settings rename). */
+  patchUser: (patch: Partial<AuthUser>) => void;
   _clear: () => void;
 };
 
@@ -103,6 +105,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   _setTokensFromRefresh: (accessToken, idToken) => {
     const u = decodeIdToken(idToken);
     set({ accessToken, idToken, user: u });
+  },
+
+  patchUser: (patch) => {
+    const current = get().user;
+    if (!current) {
+      return;
+    }
+    set({ user: { ...current, ...patch } });
   },
 
   _clear: () =>

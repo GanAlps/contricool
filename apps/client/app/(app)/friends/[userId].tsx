@@ -52,6 +52,10 @@ export default function FriendDetailScreen() {
         router.back();
         return;
       }
+      if (isApiError(err) && err.error.code === 'BALANCE_NOT_SETTLED') {
+        toast.error('Settle the balance with this friend before removing them.');
+        return;
+      }
       toast.error('Could not remove friend. Please try again.');
     }
   };
