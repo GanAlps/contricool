@@ -102,9 +102,7 @@ describe('SettingsScreen — edit name', () => {
     await waitFor(() => {
       expect(useAuthStore.getState().user?.name).toBe('Alicia');
     });
-    expect(
-      useToasterStore.getState().toasts.some((t) => t.kind === 'success'),
-    ).toBe(true);
+    expect(useToasterStore.getState().toasts.some((t) => t.kind === 'success')).toBe(true);
   });
 
   it('shows an error toast when the server rejects the new name', async () => {
@@ -132,9 +130,7 @@ describe('SettingsScreen — edit name', () => {
       fireEvent.click(screen.getByTestId('settings-name-save'));
     });
     await waitFor(() => {
-      expect(
-        useToasterStore.getState().toasts.some((t) => t.kind === 'error'),
-      ).toBe(true);
+      expect(useToasterStore.getState().toasts.some((t) => t.kind === 'error')).toBe(true);
     });
   });
 
@@ -178,9 +174,7 @@ describe('SettingsScreen — edit name', () => {
       fireEvent.click(screen.getByTestId('settings-name-save'));
     });
     expect(called).toBe(false);
-    expect(
-      useToasterStore.getState().toasts.some((t) => t.kind === 'error'),
-    ).toBe(true);
+    expect(useToasterStore.getState().toasts.some((t) => t.kind === 'error')).toBe(true);
   });
 
   it('cancel restores the original name and exits edit mode', async () => {
