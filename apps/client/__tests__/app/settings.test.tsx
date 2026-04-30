@@ -80,6 +80,123 @@ describe('SettingsScreen — profile', () => {
   });
 });
 
+describe('SettingsScreen — edit name', () => {
+  it('saves the new name and patches the auth store', async () => {
+    server.use(
+      http.patch(`${BASE}/me/profile`, async ({ request }) => {
+        const body = (await request.json()) as { name: string };
+        return HttpResponse.json(
+          { user_id: '01J0000000000000000000ALI', name: body.name, currency: 'USD' },
+          { status: 200 },
+        );
+      }),
+    );
+    renderSettings();
+    fireEvent.click(screen.getByTestId('settings-name-edit'));
+    fireEvent.change(screen.getByTestId('settings-name-input'), {
+      target: { value: 'Alicia' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('settings-name-save'));
+    });
+    await waitFor(() => {
+      expect(useAuthStore.getState().user?.name).toBe('Alicia');
+    });
+    expect(
+      useToasterStore.getState().toasts.some((t) => t.kind === 'success'),
+    ).toBe(true);
+  });
+
+  it('shows an error toast when the server rejects the new name', async () => {
+    server.use(
+      http.patch(`${BASE}/me/profile`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'VALIDATION_ERROR',
+              message: 'name must not be blank.',
+              request_id: 'r',
+              details: [{ field: 'name', issue: 'must not be blank' }],
+            },
+          },
+          { status: 422 },
+        ),
+      ),
+    );
+    renderSettings();
+    fireEvent.click(screen.getByTestId('settings-name-edit'));
+    fireEvent.change(screen.getByTestId('settings-name-input'), {
+      target: { value: 'X' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('settings-name-save'));
+    });
+    await waitFor(() => {
+      expect(
+        useToasterStore.getState().toasts.some((t) => t.kind === 'error'),
+      ).toBe(true);
+    });
+  });
+
+  it('skips the network call when the name is unchanged', async () => {
+    let called = false;
+    server.use(
+      http.patch(`${BASE}/me/profile`, () => {
+        called = true;
+        return HttpResponse.json(
+          { user_id: '01J0000000000000000000ALI', name: 'Alice', currency: 'USD' },
+          { status: 200 },
+        );
+      }),
+    );
+    renderSettings();
+    fireEvent.click(screen.getByTestId('settings-name-edit'));
+    // draftName starts as user.name, no change made.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('settings-name-save'));
+    });
+    expect(called).toBe(false);
+  });
+
+  it('blocks empty name with a toast and no network call', async () => {
+    let called = false;
+    server.use(
+      http.patch(`${BASE}/me/profile`, () => {
+        called = true;
+        return HttpResponse.json(
+          { user_id: '01J0000000000000000000ALI', name: '', currency: 'USD' },
+          { status: 200 },
+        );
+      }),
+    );
+    renderSettings();
+    fireEvent.click(screen.getByTestId('settings-name-edit'));
+    fireEvent.change(screen.getByTestId('settings-name-input'), {
+      target: { value: '   ' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('settings-name-save'));
+    });
+    expect(called).toBe(false);
+    expect(
+      useToasterStore.getState().toasts.some((t) => t.kind === 'error'),
+    ).toBe(true);
+  });
+
+  it('cancel restores the original name and exits edit mode', async () => {
+    renderSettings();
+    fireEvent.click(screen.getByTestId('settings-name-edit'));
+    fireEvent.change(screen.getByTestId('settings-name-input'), {
+      target: { value: 'Bob' },
+    });
+    fireEvent.click(screen.getByTestId('settings-name-cancel'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('settings-name-input')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('settings-name')).toHaveTextContent('Alice');
+  });
+});
+
 describe('SettingsScreen — export', () => {
   it('downloads a JSON blob on success (web)', async () => {
     server.use(
