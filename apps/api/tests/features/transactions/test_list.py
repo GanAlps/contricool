@@ -140,3 +140,43 @@ def test_list_without_jwt_401(
 ) -> None:
     resp = txn_client.get("/v1/transactions")
     assert resp.status_code == 401
+
+
+def test_list_carries_my_paid_and_owed_amounts(
+    txn_env: dict[str, object], txn_client: TestClient
+) -> None:
+    """Dashboard relies on per-row ``my_paid_amount`` / ``my_owed_amount``
+    to compute the "you owe / you're owed" cards correctly. Three
+    permutations: I paid + I'm a member; friend paid + I'm a member;
+    I paid for someone else (creator on others' behalf)."""
+    _seed(txn_env)
+    # A paid 10, equal split with B → A is paid=10, owed=5.
+    _post_eq_split(
+        txn_client,
+        members=[A, B],
+        payer=A,
+        amount="10.00",
+        requester=A,
+        key="paid-self",
+        name="A-paid",
+    )
+    # B paid 30, equal split with A,B,C → from A's POV paid=0, owed=10.
+    _post_eq_split(
+        txn_client,
+        members=[A, B, C],
+        payer=B,
+        amount="30.00",
+        requester=B,
+        key="paid-friend",
+        name="B-paid",
+    )
+
+    resp = txn_client.get("/v1/transactions", headers=auth_headers_for(A))
+    assert resp.status_code == 200
+    items = {item["name"]: item for item in resp.json()["items"]}
+    a_paid = items["A-paid"]
+    assert a_paid["my_paid_amount"] == "10.00"
+    assert a_paid["my_owed_amount"] == "5.00"
+    b_paid = items["B-paid"]
+    assert b_paid["my_paid_amount"] == "0.00"
+    assert b_paid["my_owed_amount"] == "10.00"

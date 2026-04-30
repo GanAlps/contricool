@@ -18,7 +18,11 @@ from app.features.transactions.errors import (
     ValidationFailedError,
 )
 from app.features.transactions.models import (
+    Comment,
+    CreateCommentRequest,
     CreateTransactionRequest,
+    ListCommentsQuery,
+    ListCommentsResponse,
     ListTransactionsQuery,
     ListTransactionsResponse,
     Transaction,
@@ -146,6 +150,47 @@ def delete_transaction_route(
         requester_id=principal.user_id, txn_id=txn_id
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{txn_id}/comments",
+    status_code=status.HTTP_201_CREATED,
+    response_model=Comment,
+)
+def post_comment_route(
+    txn_id: str,
+    body: CreateCommentRequest,
+    principal: Principal = Depends(current_principal),  # noqa: B008
+) -> Comment:
+    """Post a user comment on the transaction.
+
+    404 (mask) for non-members. ``body`` is 1..1000 chars after trim.
+    """
+    txn_id = _validate_ulid("txn_id", txn_id)
+    return service.post_comment(
+        requester_id=principal.user_id,
+        txn_id=txn_id,
+        body=body.body,
+    )
+
+
+@router.get(
+    "/{txn_id}/comments",
+    status_code=status.HTTP_200_OK,
+    response_model=ListCommentsResponse,
+)
+def list_comments_route(
+    txn_id: str,
+    query: ListCommentsQuery = Depends(),  # noqa: B008
+    principal: Principal = Depends(current_principal),  # noqa: B008
+) -> ListCommentsResponse:
+    txn_id = _validate_ulid("txn_id", txn_id)
+    return service.list_comments(
+        requester_id=principal.user_id,
+        txn_id=txn_id,
+        limit=query.limit,
+        cursor=query.cursor,
+    )
 
 
 @router.post(

@@ -155,7 +155,14 @@ class Transaction(BaseModel):
 
 
 class TransactionListItem(BaseModel):
-    """One row in ``GET /v1/transactions`` — META + the requester's owed."""
+    """One row in ``GET /v1/transactions`` — META + the requester's
+    owed/paid amounts.
+
+    Both ``my_owed_amount`` and ``my_paid_amount`` are surfaced so the
+    dashboard summary can compute ``net = paid - owed`` per transaction
+    without an extra round-trip to read META payers. ``my_paid_amount``
+    is the requester's slot in ``meta.payers`` (0.00 if they didn't pay).
+    """
 
     txn_id: str
     name: str
@@ -166,6 +173,7 @@ class TransactionListItem(BaseModel):
     split_method: SplitMethod
     creator_id: str
     my_owed_amount: Decimal
+    my_paid_amount: Decimal
     created_at: datetime
 
 
@@ -191,7 +199,61 @@ class ListTransactionsResponse(BaseModel):
     next_cursor: str | None = None
 
 
+# ---------------------------------------------------------------------------
+# Comments
+# ---------------------------------------------------------------------------
+
+
+CommentKind = Literal["user", "system"]
+COMMENT_BODY_MAX = 1000
+COMMENT_LIST_DEFAULT = 50
+COMMENT_LIST_MAX = 100
+
+
+class CreateCommentRequest(BaseModel):
+    """``POST /v1/transactions/{txn_id}/comments`` request body."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    body: Annotated[
+        str,
+        StringConstraints(
+            min_length=1,
+            max_length=COMMENT_BODY_MAX,
+            strip_whitespace=False,
+        ),
+    ]
+
+
+class Comment(BaseModel):
+    """One COMMENT row, rendered for the wire."""
+
+    comment_id: str
+    txn_id: str
+    author_id: str
+    body: str
+    kind: CommentKind
+    created_at: datetime
+
+
+class ListCommentsQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    limit: Annotated[int, Field(ge=1, le=COMMENT_LIST_MAX)] = COMMENT_LIST_DEFAULT
+    cursor: str | None = None
+
+
+class ListCommentsResponse(BaseModel):
+    """``GET /v1/transactions/{txn_id}/comments`` 200 body."""
+
+    items: list[Comment]
+    next_cursor: str | None = None
+
+
 __all__ = [
+    "COMMENT_BODY_MAX",
+    "COMMENT_LIST_DEFAULT",
+    "COMMENT_LIST_MAX",
     "DATE_FUTURE_TOLERANCE_DAYS",
     "DATE_PAST_HORIZON_DAYS",
     "DEFAULT_LIST_LIMIT",
@@ -200,8 +262,13 @@ __all__ = [
     "MIN_MEMBERS",
     "PERCENT_TOLERANCE",
     "SUM_TOLERANCE",
+    "Comment",
+    "CommentKind",
+    "CreateCommentRequest",
     "CreateTransactionRequest",
     "Currency",
+    "ListCommentsQuery",
+    "ListCommentsResponse",
     "ListTransactionsQuery",
     "ListTransactionsResponse",
     "Member",

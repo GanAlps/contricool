@@ -27,6 +27,17 @@ Phase 5 will add edit / delete / restore / audit-read.
 | `GET` | `/v1/transactions` | List my transactions, newest first. Optional `friend_id` query param to intersect. Pagination via `cursor` + `limit` (1..100, default 20). | JWT | n/a |
 | `GET` | `/v1/transactions/{txn_id}` | Get one transaction. 404 `NOT_FOUND` if you're not a member (mask). | JWT | n/a |
 | `GET` | `/v1/friends/{user_id}/balance` | (friends route, transactions math) Net balance with a friend across all non-deleted transactions. | JWT | n/a |
+| `POST` | `/v1/transactions/{txn_id}/comments` | Member-only: post a free-form comment (1..1000 chars). | JWT | n/a |
+| `GET` | `/v1/transactions/{txn_id}/comments` | Member-only: list comments oldest-first. Includes server-generated **system** comments emitted whenever a transaction is edited (kind: `system`, author: `system`). | JWT | n/a |
+
+`TransactionListItem` carries both `my_owed_amount` and
+`my_paid_amount` so the dashboard summary can compute
+`net = paid - owed` per row without an extra read on `meta.payers`.
+
+System comments are best-effort: a transient DDB write failure on the
+COMMENT row is logged but does not roll back a successful META edit,
+so the user always sees their edit succeed. The summary is suppressed
+for no-op edits.
 
 ### Request shapes
 
