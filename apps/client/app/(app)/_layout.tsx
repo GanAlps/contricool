@@ -41,6 +41,9 @@ export default function AppLayout() {
           <NavLink to="/friends" testID="navlink-friends">
             Friends
           </NavLink>
+          <NavLink to="/transactions" testID="navlink-transactions">
+            Transactions
+          </NavLink>
         </View>
         <View className="flex-row items-center gap-3">
           <Text testID="topbar-user" className="text-sm text-neutral-700">

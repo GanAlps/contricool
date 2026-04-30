@@ -47,6 +47,73 @@ export const AddFriendSchema = z.object({
 });
 export type AddFriendValues = z.infer<typeof AddFriendSchema>;
 
+// ---------------------------------------------------------------------------
+// Transactions (Phase 4c).
+//
+// Structural validation only — the server is the authoritative
+// validator (Phase 4b's `service.validate_create_payload` enforces
+// the per-method invariants and returns stable error codes). We do
+// the obvious checks here to give the form a fast-fail UX without
+// duplicating the backend's validation logic.
+// ---------------------------------------------------------------------------
+
+// User-id is whatever the friends-list API hands us; the server is
+// the authoritative validator. Client-side check is "non-empty" —
+// any stricter shape would risk rejecting legitimate ids returned
+// by an in-flight backend evolution (e.g. UUID-shaped service ids
+// during a future migration).
+const ULID_PATTERN = /^.{1,128}$/;
+
+const decimalAmount = z
+  .string()
+  .trim()
+  .regex(/^\d+(\.\d{1,2})?$/, 'Enter a number with up to 2 decimal places')
+  .refine((v) => Number(v) > 0, 'Must be positive');
+
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use the YYYY-MM-DD format');
+
+const ulid = z.string().regex(ULID_PATTERN, 'Invalid user id');
+
+const TxnMemberZ = z.object({
+  user_id: ulid,
+  share: z.string().trim().optional().nullable(),
+  percent: z.string().trim().optional().nullable(),
+  owed_amount: z.string().trim().optional().nullable(),
+});
+
+// Payer paid_amount is filled from the form's `amount` field at
+// submit time (single-payer at MVP), so the schema accepts a
+// permissive shape here — server validation is authoritative.
+const TxnPayerZ = z.object({
+  user_id: ulid,
+  paid_amount: z.string().trim(),
+});
+
+export const AddTransactionSchema = z
+  .object({
+    name: z.string().trim().min(1, 'Required').max(120, 'Too long'),
+    type: z.enum(['expense', 'settlement']),
+    amount: decimalAmount,
+    currency: currency,
+    txn_date: isoDate,
+    note: z.string().max(500, 'Too long (max 500)').default(''),
+    split_method: z.enum(['equal', 'amount', 'share', 'percent']),
+    members: z.array(TxnMemberZ).min(2, 'Pick at least one friend').max(10, 'Max 10 members'),
+    payers: z.array(TxnPayerZ).min(1).max(10),
+  })
+  .superRefine((data, ctx) => {
+    // Settlement-type structural sanity (server has the authoritative
+    // check; we surface it earlier as a UX win).
+    if (data.type === 'settlement' && data.members.length !== 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['members'],
+        message: 'Settlement must have exactly two members',
+      });
+    }
+  });
+export type AddTransactionValues = z.infer<typeof AddTransactionSchema>;
+
 export const ResetPasswordSchema = z
   .object({
     email,

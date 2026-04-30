@@ -110,3 +110,23 @@ export type FriendItem = ListFriendsResponse['items'][number];
 
 export type FriendBalanceResponse =
   AuthPaths['/friends/{user_id}/balance']['get']['responses']['200']['content']['application/json'];
+
+// ---------------------------------------------------------------------------
+// Transactions surface (Phase 4c client consumes these aliases).
+// ---------------------------------------------------------------------------
+
+export type CreateTransactionRequest = NonNullable<
+  AuthPaths['/transactions']['post']['requestBody']
+>['content']['application/json'];
+export type Transaction =
+  AuthPaths['/transactions']['post']['responses']['201']['content']['application/json'];
+
+export type ListTransactionsResponse =
+  AuthPaths['/transactions']['get']['responses']['200']['content']['application/json'];
+export type TransactionListItem = ListTransactionsResponse['items'][number];
+
+export type TransactionMember = Transaction['members'][number];
+export type TransactionPayer = Transaction['payers'][number];
+
+export type SplitMethod = Transaction['split_method'];
+export type TxnType = Transaction['type'];
