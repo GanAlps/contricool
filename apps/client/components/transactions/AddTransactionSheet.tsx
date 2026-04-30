@@ -42,6 +42,10 @@ const BANNER_ERRORS: Record<string, string> = {
 
 const TOAST_ERRORS: Record<string, string> = {
   IDEMPOTENCY_KEY_REUSED: 'This transaction was already created. Refresh to see it.',
+  // Should never reach here in practice — the form always supplies the
+  // header — but defensively map it so a regression in the wiring
+  // surfaces a useful message instead of the generic catch-all.
+  IDEMPOTENCY_KEY_REQUIRED: 'Please retry the request.',
 };
 
 function isApiError(err: unknown): err is ApiErrorException {
@@ -99,13 +103,22 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId }: Props) {
 
   // Reset everything when the sheet (re-)opens. Mint a fresh idempotency
   // key per open so cancel-then-reopen never collides server-side.
+  //
+  // ``prefillFriendId`` is gated on ``pickableFriends`` so a cross-
+  // currency friend passed in via the prop doesn't bypass the same-
+  // currency picker filter and land silently in the submitted body
+  // (server would 422 on CURRENCY_MISMATCH and the user couldn't
+  // remove the invisible chip).
   useEffect(() => {
     if (open) {
       idempotencyKeyRef.current = newIdempotencyKey();
-      reset(defaultValues(myUserId, myCurrency, prefillFriendId));
+      const safePrefill = pickableFriends.some((f) => f.user_id === prefillFriendId)
+        ? prefillFriendId
+        : undefined;
+      reset(defaultValues(myUserId, myCurrency, safePrefill));
       setBannerMessage(null);
     }
-  }, [open, reset, myUserId, myCurrency, prefillFriendId]);
+  }, [open, reset, myUserId, myCurrency, prefillFriendId, pickableFriends]);
 
   const watchedMembers = watch('members');
   const watchedAmount = watch('amount');

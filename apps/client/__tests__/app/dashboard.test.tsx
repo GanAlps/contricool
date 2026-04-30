@@ -5,12 +5,15 @@
  * tests are removed here.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { Toaster, useToasterStore } from '~/components/ui/Toaster';
 import { useAuthStore } from '~/lib/auth-store';
+
+import { server } from '../msw-handlers';
 
 import { mockExpoRouter, resetRouterMock } from './_router-mock';
 
@@ -100,5 +103,57 @@ describe('DashboardScreen', () => {
     });
     renderDashboard();
     expect(screen.getByTestId('dashboard-add-txn')).toBeInTheDocument();
+  });
+});
+
+describe('DashboardScreen — empty state', () => {
+  it('renders the dashboard-empty card when no transactions', async () => {
+    server.use(
+      http.get('http://localhost/v1/transactions', () =>
+        HttpResponse.json({ items: [], next_cursor: null }, { status: 200 }),
+      ),
+    );
+    useAuthStore.setState({
+      user: { user_id: 'u', name: 'Alice', currency: 'USD' },
+      accessToken: 't',
+      idToken: 'i',
+      loading: false,
+    });
+    renderDashboard();
+    await waitFor(() => expect(screen.getByTestId('dashboard-empty')).toBeInTheDocument());
+    expect(screen.getByTestId('dashboard-empty-add')).toBeInTheDocument();
+  });
+});
+
+describe('DashboardScreen — interactions', () => {
+  it('opens the add-transaction sheet when the header CTA is tapped', async () => {
+    useAuthStore.setState({
+      user: { user_id: 'u', name: 'Alice', currency: 'USD' },
+      accessToken: 't',
+      idToken: 'i',
+      loading: false,
+    });
+    renderDashboard();
+    fireEvent.click(screen.getByTestId('dashboard-add-txn'));
+    await waitFor(() => expect(screen.getByTestId('add-txn-sheet')).toBeInTheDocument());
+  });
+
+  it('routes to the txn detail page when a row is tapped', async () => {
+    useAuthStore.setState({
+      user: { user_id: 'u', name: 'Alice', currency: 'USD' },
+      accessToken: 't',
+      idToken: 'i',
+      loading: false,
+    });
+    renderDashboard();
+    await waitFor(() => expect(screen.getByTestId('dashboard-list')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('txn-row-01J0000000000000000000TX1'));
+    // Router push happened — the test mock's call list includes a `push`.
+    const { getRouterMock } = await import('./_router-mock');
+    expect(
+      getRouterMock().calls.some(
+        (c) => c.kind === 'push' && c.href === '/transactions/01J0000000000000000000TX1',
+      ),
+    ).toBe(true);
   });
 });

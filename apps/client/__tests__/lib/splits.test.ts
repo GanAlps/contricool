@@ -50,3 +50,13 @@ describe('sumAmounts', () => {
     expect(sumAmounts([])).toBe('0.00');
   });
 });
+
+describe('toCents (via previewEqualSplit)', () => {
+  it('throws on a malformed amount string', () => {
+    expect(() => previewEqualSplit('not a number', 2)).toThrow(/invalid amount/);
+  });
+
+  it('rejects member_count < 1', () => {
+    expect(() => previewEqualSplit('10.00', 0)).toThrow(/memberCount/);
+  });
+});
