@@ -380,7 +380,7 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 |---|---|---|
 | 4a | CDK Transactions DDB table (Data stack extension) | `specs/phase-4a-transactions-table/` |
 | 4b | Backend `transactions` feature (splits, balance, models, repository, service, routes, idempotency) | `specs/phase-4b-transactions-backend/` |
-| 4c | Frontend transaction UI (dashboard, list, new-txn form, detail) — TBD |
+| 4c | Frontend transaction UI (dashboard, list, new-txn form, detail) | `specs/phase-4c-transactions-client/` |
 
 ### 4a — Transactions DDB table (CDK Data stack)
 
@@ -401,13 +401,14 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 
 ### 4c — Frontend transaction UI
 
-- [ ] `(app)/dashboard.tsx` — recent activity (last 10), summary cards "Total you owe" / "Total owed to you".
-- [ ] `(app)/transactions/index.tsx` — paginated list with filter chips.
-- [ ] `(app)/transactions/new.tsx` — the add-transaction form per Design 10's state diagram. Sections: name, amount, date, members (friend picker, max 10), paid-by (subset of members), split method (segmented control with per-method input rows), note.
-- [ ] `(app)/transactions/[txnId]/index.tsx` — read-only detail view (edit/delete in Phase 5).
-- [ ] Friend detail page (`/friends/[userId]`): now lists transactions with that friend, shows computed net balance.
-- [ ] Hooks: `useTransactions`, `useTransaction`, `useCreateTransaction`, `useFriendBalance`.
-- [ ] React Hook Form + Zod schemas mirroring server Pydantic models.
+- [x] `(app)/dashboard.tsx` — recent activity (last 10), summary cards "Total you owe" / "Total you're owed".
+- [x] `(app)/transactions/index.tsx` — paginated list with filter chips.
+- [x] `components/transactions/AddTransactionSheet.tsx` — the add-transaction form (single sheet, RHF + Zod, idempotency-key lifecycle, typed-error mapping). Wired into dashboard + list + friend detail.
+- [x] `(app)/transactions/[txnId].tsx` — read-only detail view (edit/delete in Phase 5).
+- [x] Friend detail page (`/friends/[userId]`): now lists transactions with that friend, shows computed net balance.
+- [x] Hooks: `useTransactions`, `useTransaction`, `useCreateTransaction`; `useFriendBalance` reused.
+- [x] React Hook Form + Zod schema (`AddTransactionSchema`) mirroring the structural shape of `CreateTransactionRequest`.
+- [x] Spec at `specs/phase-4c-transactions-client/`.
 
 ### Phase-4 tests
 

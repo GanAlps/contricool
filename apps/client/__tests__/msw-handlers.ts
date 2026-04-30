@@ -132,7 +132,10 @@ export const defaultHandlers = [
       {
         user_id: params.userId,
         currency: 'USD',
-        net: '0',
+        // Two-decimal Decimal shape — matches the Pydantic-serialised
+        // value the live backend returns. Tests asserting `0.00 USD`
+        // depend on this.
+        net: '0.00',
         settlement_status: 'settled',
         last_transaction_at: null,
       },
@@ -140,6 +143,120 @@ export const defaultHandlers = [
     ),
   ),
   http.delete(`${BASE}/friends/:userId`, async () => new HttpResponse(null, { status: 204 })),
+  // ---- Phase 4c transactions surface ----
+  http.get(`${BASE}/transactions`, async () =>
+    HttpResponse.json(
+      {
+        items: [
+          {
+            txn_id: '01J0000000000000000000TX1',
+            name: 'Dinner',
+            type: 'expense',
+            amount: '30.00',
+            currency: 'USD',
+            txn_date: '2026-04-29',
+            split_method: 'equal',
+            creator_id: '01J0000000000000000000ALI',
+            my_owed_amount: '10.00',
+            created_at: '2026-04-29T20:00:00Z',
+          },
+        ],
+        next_cursor: null,
+      },
+      { status: 200 },
+    ),
+  ),
+  http.get(`${BASE}/transactions/:txnId`, async ({ params }) => {
+    const id = String(params.txnId);
+    return HttpResponse.json(
+      {
+        txn_id: id,
+        creator_id: '01J0000000000000000000ALI',
+        name: 'Dinner',
+        type: 'expense',
+        amount: '30.00',
+        currency: 'USD',
+        txn_date: '2026-04-29',
+        note: '',
+        split_method: 'equal',
+        members: [
+          {
+            user_id: '01J0000000000000000000ALI',
+            owed_amount: '10.00',
+            share: null,
+            percent: null,
+          },
+          {
+            user_id: '01J0000000000000000000BOB',
+            owed_amount: '10.00',
+            share: null,
+            percent: null,
+          },
+          {
+            user_id: '01J0000000000000000000CAR',
+            owed_amount: '10.00',
+            share: null,
+            percent: null,
+          },
+        ],
+        payers: [{ user_id: '01J0000000000000000000ALI', paid_amount: '30.00' }],
+        created_at: '2026-04-29T20:00:00Z',
+        updated_at: '2026-04-29T20:00:00Z',
+        deleted_at: null,
+      },
+      { status: 200 },
+    );
+  }),
+  http.post(`${BASE}/transactions`, async ({ request }) => {
+    type CreateBody = {
+      name: string;
+      type: string;
+      amount: string;
+      currency: string;
+      txn_date: string;
+      split_method: string;
+      members: { user_id: string }[];
+      payers: { user_id: string; paid_amount: string }[];
+    };
+    const idempotencyKey = request.headers.get('idempotency-key') ?? '';
+    if (!idempotencyKey) {
+      return HttpResponse.json(
+        {
+          error: {
+            code: 'IDEMPOTENCY_KEY_REQUIRED',
+            message: 'header required',
+            request_id: 'r',
+          },
+        },
+        { status: 400 },
+      );
+    }
+    const body = (await request.json()) as CreateBody;
+    return HttpResponse.json(
+      {
+        txn_id: '01J0000000000000000000NEW',
+        creator_id: body.members[0]?.user_id,
+        name: body.name,
+        type: body.type,
+        amount: body.amount,
+        currency: body.currency,
+        txn_date: body.txn_date,
+        note: '',
+        split_method: body.split_method,
+        members: body.members.map((m) => ({
+          user_id: m.user_id,
+          owed_amount: '0.00',
+          share: null,
+          percent: null,
+        })),
+        payers: body.payers,
+        created_at: '2026-04-29T20:00:00Z',
+        updated_at: '2026-04-29T20:00:00Z',
+        deleted_at: null,
+      },
+      { status: 201 },
+    );
+  }),
 ];
 
 export const server = setupServer(...defaultHandlers);

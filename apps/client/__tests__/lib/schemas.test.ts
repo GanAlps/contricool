@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  AddTransactionSchema,
   ForgotPasswordSchema,
   LoginSchema,
   ResetPasswordSchema,
@@ -96,5 +97,51 @@ describe('ResetPasswordSchema', () => {
   });
   it('rejects bad code', () => {
     expect(ResetPasswordSchema.safeParse({ ...base, code: 'abc' }).success).toBe(false);
+  });
+});
+
+describe('AddTransactionSchema', () => {
+  const baseExpense = {
+    name: 'Dinner',
+    type: 'expense',
+    amount: '30.00',
+    currency: 'USD',
+    txn_date: '2026-04-29',
+    note: '',
+    split_method: 'equal',
+    members: [
+      { user_id: 'me', share: null, percent: null, owed_amount: null },
+      { user_id: 'bob', share: null, percent: null, owed_amount: null },
+    ],
+    payers: [{ user_id: 'me', paid_amount: '30.00' }],
+  };
+
+  it('accepts a valid expense', () => {
+    expect(AddTransactionSchema.safeParse(baseExpense).success).toBe(true);
+  });
+
+  it('rejects amount = 0', () => {
+    expect(AddTransactionSchema.safeParse({ ...baseExpense, amount: '0' }).success).toBe(false);
+  });
+
+  it('rejects fewer than 2 members', () => {
+    expect(
+      AddTransactionSchema.safeParse({ ...baseExpense, members: [baseExpense.members[0]] }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a settlement with a wrong member count (3 members)', () => {
+    const r = AddTransactionSchema.safeParse({
+      ...baseExpense,
+      type: 'settlement',
+      members: [
+        ...baseExpense.members,
+        { user_id: 'car', share: null, percent: null, owed_amount: null },
+      ],
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues.some((i) => i.path.includes('members'))).toBe(true);
+    }
   });
 });

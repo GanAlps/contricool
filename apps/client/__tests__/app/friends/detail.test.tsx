@@ -164,3 +164,55 @@ describe('FriendDetailScreen — remove flow', () => {
     expect(getRouterMock().calls.find((c) => c.kind === 'back')).toBeUndefined();
   });
 });
+
+describe('FriendDetailScreen — balance status variants', () => {
+  it('renders friend_owes headline', async () => {
+    server.use(
+      http.get('http://localhost/v1/friends/:userId/balance', ({ params }) =>
+        HttpResponse.json(
+          {
+            user_id: params.userId,
+            currency: 'USD',
+            net: '15.00',
+            settlement_status: 'friend_owes',
+            last_transaction_at: '2026-04-29T12:00:00Z',
+          },
+          { status: 200 },
+        ),
+      ),
+    );
+    renderDetail();
+    await waitFor(() => expect(screen.getByTestId('friend-detail-headline')).toBeInTheDocument());
+    expect(screen.getByTestId('friend-detail-headline')).toHaveTextContent(/Friend owes you/);
+  });
+
+  it('renders you_owe headline with absolute value', async () => {
+    server.use(
+      http.get('http://localhost/v1/friends/:userId/balance', ({ params }) =>
+        HttpResponse.json(
+          {
+            user_id: params.userId,
+            currency: 'USD',
+            net: '-7.50',
+            settlement_status: 'you_owe',
+            last_transaction_at: '2026-04-29T12:00:00Z',
+          },
+          { status: 200 },
+        ),
+      ),
+    );
+    renderDetail();
+    await waitFor(() => expect(screen.getByTestId('friend-detail-headline')).toBeInTheDocument());
+    expect(screen.getByTestId('friend-detail-headline')).toHaveTextContent(/You owe 7\.50/);
+  });
+
+  it('renders friend transactions empty state when none', async () => {
+    server.use(
+      http.get('http://localhost/v1/transactions', () =>
+        HttpResponse.json({ items: [], next_cursor: null }, { status: 200 }),
+      ),
+    );
+    renderDetail();
+    await waitFor(() => expect(screen.getByTestId('friend-txns-empty')).toBeInTheDocument());
+  });
+});
