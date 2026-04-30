@@ -279,6 +279,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update My Profile Route
+         * @description Update the requester's display name.
+         *
+         *     Email and currency are not editable from this endpoint and any
+         *     extra body field is rejected (Pydantic ``extra="forbid"``).
+         */
+        patch: operations["update_my_profile_route_v1_me_profile_patch"];
+        trace?: never;
+    };
     "/telemetry/error": {
         parameters: {
             query?: never;
@@ -358,6 +381,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/transactions/{txn_id}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Comments Route */
+        get: operations["list_comments_route_v1_transactions__txn_id__comments_get"];
+        put?: never;
+        /**
+         * Post Comment Route
+         * @description Post a user comment on the transaction.
+         *
+         *     404 (mask) for non-members. ``body`` is 1..1000 chars after trim.
+         */
+        post: operations["post_comment_route_v1_transactions__txn_id__comments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/transactions/{txn_id}/restore": {
         parameters: {
             query?: never;
@@ -409,6 +455,7 @@ export interface components {
          * @description ``POST /v1/friends/add`` 200 response — same shape as a list row.
          */
         AddFriendResponse: {
+            balance?: components["schemas"]["FriendBalanceSummary"] | null;
             /**
              * Currency
              * @enum {string}
@@ -423,6 +470,38 @@ export interface components {
             since: string;
             /** User Id */
             user_id: string;
+        };
+        /**
+         * Comment
+         * @description One COMMENT row, rendered for the wire.
+         */
+        Comment: {
+            /** Author Id */
+            author_id: string;
+            /** Body */
+            body: string;
+            /** Comment Id */
+            comment_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "user" | "system";
+            /** Txn Id */
+            txn_id: string;
+        };
+        /**
+         * CreateCommentRequest
+         * @description ``POST /v1/transactions/{txn_id}/comments`` request body.
+         */
+        CreateCommentRequest: {
+            /** Body */
+            body: string;
         };
         /**
          * CreateTransactionRequest
@@ -526,10 +605,30 @@ export interface components {
             user_id: string;
         };
         /**
+         * FriendBalanceSummary
+         * @description Compact pair-balance shape carried on each ``FriendItem``.
+         */
+        FriendBalanceSummary: {
+            /** Net */
+            net: string;
+            /**
+             * Settlement Status
+             * @enum {string}
+             */
+            settlement_status: "settled" | "friend_owes" | "you_owe";
+        };
+        /**
          * FriendItem
          * @description One row in the friends list — the friend's identity-safe shape.
+         *
+         *     ``balance`` is the requester-perspective net balance with the
+         *     friend (sign convention matches :class:`FriendBalanceResponse`).
+         *     Optional only because :class:`AddFriendResponse` reuses this shape
+         *     on add — the add response doesn't compute a balance because it's
+         *     always zero on a freshly-created friendship.
          */
         FriendItem: {
+            balance?: components["schemas"]["FriendBalanceSummary"] | null;
             /**
              * Currency
              * @enum {string}
@@ -571,6 +670,16 @@ export interface components {
             status: string;
             /** Version */
             version: string;
+        };
+        /**
+         * ListCommentsResponse
+         * @description ``GET /v1/transactions/{txn_id}/comments`` 200 body.
+         */
+        ListCommentsResponse: {
+            /** Items */
+            items: components["schemas"]["Comment"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
         };
         /**
          * ListFriendsResponse
@@ -645,6 +754,21 @@ export interface components {
             name: string;
             /** Status */
             status: string;
+            /** User Id */
+            user_id: string;
+        };
+        /**
+         * MeProfileSlim
+         * @description ``PATCH /v1/me/profile`` 200 response.
+         */
+        MeProfileSlim: {
+            /**
+             * Currency
+             * @enum {string}
+             */
+            currency: "USD" | "INR";
+            /** Name */
+            name: string;
             /** User Id */
             user_id: string;
         };
@@ -926,7 +1050,13 @@ export interface components {
         };
         /**
          * TransactionListItem
-         * @description One row in ``GET /v1/transactions`` — META + the requester's owed.
+         * @description One row in ``GET /v1/transactions`` — META + the requester's
+         *     owed/paid amounts.
+         *
+         *     Both ``my_owed_amount`` and ``my_paid_amount`` are surfaced so the
+         *     dashboard summary can compute ``net = paid - owed`` per transaction
+         *     without an extra round-trip to read META payers. ``my_paid_amount``
+         *     is the requester's slot in ``meta.payers`` (0.00 if they didn't pay).
          */
         TransactionListItem: {
             /** Amount */
@@ -945,6 +1075,8 @@ export interface components {
             currency: "USD" | "INR";
             /** My Owed Amount */
             my_owed_amount: string;
+            /** My Paid Amount */
+            my_paid_amount: string;
             /** Name */
             name: string;
             /**
@@ -964,6 +1096,18 @@ export interface components {
              * @enum {string}
              */
             type: "expense" | "settlement";
+        };
+        /**
+         * UpdateProfileRequest
+         * @description ``PATCH /v1/me/profile`` request body.
+         *
+         *     Only the display ``name`` is mutable. Email and ``currency`` are
+         *     intentionally absent and any extra field is rejected so that
+         *     accidental client churn cannot rewrite them.
+         */
+        UpdateProfileRequest: {
+            /** Name */
+            name: string;
         };
         /** ValidationError */
         ValidationError: {
@@ -1430,6 +1574,39 @@ export interface operations {
             };
         };
     };
+    update_my_profile_route_v1_me_profile_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeProfileSlim"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     record_telemetry_event_v1_telemetry_error_post: {
         parameters: {
             query?: never;
@@ -1616,6 +1793,75 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_comments_route_v1_transactions__txn_id__comments_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                txn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListCommentsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_comment_route_v1_transactions__txn_id__comments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                txn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCommentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Comment"];
+                };
             };
             /** @description Validation Error */
             422: {

@@ -140,3 +140,21 @@ export type ExportResponse =
 export type MeProfile = ExportResponse['profile'];
 export type FriendshipExport = ExportResponse['friendships'][number];
 export type TransactionExport = ExportResponse['transactions'][number];
+
+export type UpdateProfileRequest = NonNullable<
+  AuthPaths['/me/profile']['patch']['requestBody']
+>['content']['application/json'];
+export type MeProfileSlim =
+  AuthPaths['/me/profile']['patch']['responses']['200']['content']['application/json'];
+
+// ---------------------------------------------------------------------------
+// Comments surface (Phase 7b).
+// ---------------------------------------------------------------------------
+
+export type CreateCommentRequest = NonNullable<
+  AuthPaths['/transactions/{txn_id}/comments']['post']['requestBody']
+>['content']['application/json'];
+export type Comment =
+  AuthPaths['/transactions/{txn_id}/comments']['post']['responses']['201']['content']['application/json'];
+export type ListCommentsResponse =
+  AuthPaths['/transactions/{txn_id}/comments']['get']['responses']['200']['content']['application/json'];

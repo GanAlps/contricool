@@ -32,6 +32,10 @@ components:
     AddFriendResponse:
       description: '``POST /v1/friends/add`` 200 response — same shape as a list row.'
       properties:
+        balance:
+          anyOf:
+          - $ref: '#/components/schemas/FriendBalanceSummary'
+          - type: 'null'
         currency:
           enum:
           - USD
@@ -54,6 +58,53 @@ components:
       - currency
       - since
       title: AddFriendResponse
+      type: object
+    Comment:
+      description: One COMMENT row, rendered for the wire.
+      properties:
+        author_id:
+          title: Author Id
+          type: string
+        body:
+          title: Body
+          type: string
+        comment_id:
+          title: Comment Id
+          type: string
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        kind:
+          enum:
+          - user
+          - system
+          title: Kind
+          type: string
+        txn_id:
+          title: Txn Id
+          type: string
+      required:
+      - comment_id
+      - txn_id
+      - author_id
+      - body
+      - kind
+      - created_at
+      title: Comment
+      type: object
+    CreateCommentRequest:
+      additionalProperties: false
+      description: '``POST /v1/transactions/{txn_id}/comments`` request body.'
+      properties:
+        body:
+          maxLength: 1000
+          minLength: 1
+          title: Body
+          type: string
+      required:
+      - body
+      title: CreateCommentRequest
       type: object
     CreateTransactionRequest:
       additionalProperties: false
@@ -220,9 +271,42 @@ components:
       - settlement_status
       title: FriendBalanceResponse
       type: object
-    FriendItem:
-      description: One row in the friends list — the friend's identity-safe shape.
+    FriendBalanceSummary:
+      description: Compact pair-balance shape carried on each ``FriendItem``.
       properties:
+        net:
+          title: Net
+          type: string
+        settlement_status:
+          enum:
+          - settled
+          - friend_owes
+          - you_owe
+          title: Settlement Status
+          type: string
+      required:
+      - net
+      - settlement_status
+      title: FriendBalanceSummary
+      type: object
+    FriendItem:
+      description: 'One row in the friends list — the friend''s identity-safe shape.
+
+
+        ``balance`` is the requester-perspective net balance with the
+
+        friend (sign convention matches :class:`FriendBalanceResponse`).
+
+        Optional only because :class:`AddFriendResponse` reuses this shape
+
+        on add — the add response doesn''t compute a balance because it''s
+
+        always zero on a freshly-created friendship.'
+      properties:
+        balance:
+          anyOf:
+          - $ref: '#/components/schemas/FriendBalanceSummary'
+          - type: 'null'
         currency:
           enum:
           - USD
@@ -286,6 +370,23 @@ components:
       - env
       - version
       title: HealthResponse
+      type: object
+    ListCommentsResponse:
+      description: '``GET /v1/transactions/{txn_id}/comments`` 200 body.'
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/Comment'
+          title: Items
+          type: array
+        next_cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Next Cursor
+      required:
+      - items
+      title: ListCommentsResponse
       type: object
     ListFriendsResponse:
       description: '``GET /v1/friends`` 200 response.
@@ -415,6 +516,27 @@ components:
       - status
       - created_at
       title: MeProfile
+      type: object
+    MeProfileSlim:
+      description: '``PATCH /v1/me/profile`` 200 response.'
+      properties:
+        currency:
+          enum:
+          - USD
+          - INR
+          title: Currency
+          type: string
+        name:
+          title: Name
+          type: string
+        user_id:
+          title: User Id
+          type: string
+      required:
+      - user_id
+      - name
+      - currency
+      title: MeProfileSlim
       type: object
     Member:
       description: One member, with the server-computed ``owed_amount``.
@@ -873,7 +995,18 @@ components:
       title: TransactionExport
       type: object
     TransactionListItem:
-      description: One row in ``GET /v1/transactions`` — META + the requester's owed.
+      description: 'One row in ``GET /v1/transactions`` — META + the requester''s
+
+        owed/paid amounts.
+
+
+        Both ``my_owed_amount`` and ``my_paid_amount`` are surfaced so the
+
+        dashboard summary can compute ``net = paid - owed`` per transaction
+
+        without an extra round-trip to read META payers. ``my_paid_amount``
+
+        is the requester''s slot in ``meta.payers`` (0.00 if they didn''t pay).'
       properties:
         amount:
           title: Amount
@@ -893,6 +1026,9 @@ components:
           type: string
         my_owed_amount:
           title: My Owed Amount
+          type: string
+        my_paid_amount:
+          title: My Paid Amount
           type: string
         name:
           title: Name
@@ -928,8 +1064,29 @@ components:
       - split_method
       - creator_id
       - my_owed_amount
+      - my_paid_amount
       - created_at
       title: TransactionListItem
+      type: object
+    UpdateProfileRequest:
+      additionalProperties: false
+      description: '``PATCH /v1/me/profile`` request body.
+
+
+        Only the display ``name`` is mutable. Email and ``currency`` are
+
+        intentionally absent and any extra field is rejected so that
+
+        accidental client churn cannot rewrite them.'
+      properties:
+        name:
+          maxLength: 128
+          minLength: 1
+          title: Name
+          type: string
+      required:
+      - name
+      title: UpdateProfileRequest
       type: object
     ValidationError:
       properties:
@@ -1343,6 +1500,37 @@ paths:
       summary: Export My Data Route
       tags:
       - me
+  /me/profile:
+    patch:
+      description: 'Update the requester''s display name.
+
+
+        Email and currency are not editable from this endpoint and any
+
+        extra body field is rejected (Pydantic ``extra="forbid"``).'
+      operationId: update_my_profile_route_v1_me_profile_patch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeProfileSlim'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Update My Profile Route
+      tags:
+      - me
   /telemetry/error:
     post:
       description: 'Log a structured frontend telemetry event.
@@ -1564,6 +1752,84 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
           description: Validation Error
       summary: Update Transaction Route
+      tags:
+      - transactions
+  /transactions/{txn_id}/comments:
+    get:
+      operationId: list_comments_route_v1_transactions__txn_id__comments_get
+      parameters:
+      - in: path
+        name: txn_id
+        required: true
+        schema:
+          title: Txn Id
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          default: 50
+          maximum: 100
+          minimum: 1
+          title: Limit
+          type: integer
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListCommentsResponse'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: List Comments Route
+      tags:
+      - transactions
+    post:
+      description: 'Post a user comment on the transaction.
+
+
+        404 (mask) for non-members. ``body`` is 1..1000 chars after trim.'
+      operationId: post_comment_route_v1_transactions__txn_id__comments_post
+      parameters:
+      - in: path
+        name: txn_id
+        required: true
+        schema:
+          title: Txn Id
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCommentRequest'
+        required: true
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comment'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Post Comment Route
       tags:
       - transactions
   /transactions/{txn_id}/restore:
