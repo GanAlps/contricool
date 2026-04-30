@@ -1272,6 +1272,13 @@ def test_api_stack_phase2c_logout_route_uses_jwt_authorizer(
 def test_api_stack_phase2c_catchall_route_uses_jwt_authorizer(
     cdk_env: cdk.Environment,
 ) -> None:
+    """Every catch-all route MUST carry JWT auth.
+
+    The catch-all is registered for the explicit method set
+    {GET, POST, PUT, DELETE, PATCH, HEAD} — ``OPTIONS`` is
+    intentionally absent so API Gateway's auto-CORS-preflight
+    handler answers OPTIONS without invoking the authorizer.
+    """
     template = _api_stack_template("dev", cdk_env)
     routes = template.find_resources("AWS::ApiGatewayV2::Route")
     catchall = [
@@ -1279,9 +1286,20 @@ def test_api_stack_phase2c_catchall_route_uses_jwt_authorizer(
         for props in routes.values()
         if props["Properties"].get("RouteKey", "").endswith("/{proxy+}")
     ]
-    assert len(catchall) == 1
-    props = catchall[0]["Properties"]
-    assert props.get("AuthorizationType") == "JWT"
+    expected_methods = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"}
+    actual_methods = {
+        str(props["Properties"].get("RouteKey", "")).split(" ", 1)[0]
+        for props in catchall
+    }
+    assert actual_methods == expected_methods, (
+        f"Catch-all route methods drifted: {actual_methods}"
+    )
+    # OPTIONS must never be in the catch-all (would route preflight
+    # through the authorizer and break local-dev CORS).
+    assert "OPTIONS" not in actual_methods
+    for props in catchall:
+        assert props["Properties"].get("AuthorizationType") == "JWT"
+        assert props["Properties"].get("AuthorizerId")
 
 
 def test_api_stack_phase2c_per_route_throttling_present(
