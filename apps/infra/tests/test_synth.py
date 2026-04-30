@@ -9,6 +9,7 @@ public access).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import aws_cdk as cdk
 import pytest
@@ -901,12 +902,28 @@ def test_auth_stack_account_recovery_email_only(cdk_env: cdk.Environment) -> Non
     )
 
 
-def test_data_stack_table_keys_billing_ttl(cdk_env: cdk.Environment) -> None:
+def _find_table(
+    template: assertions.Template, table_name: str
+) -> Any:
+    """Return the synthesised resource dict for a table looked up by name.
+
+    With Phase 4a the Data stack synthesises two tables, so picking via
+    ``next(iter(...))`` is non-deterministic. Always go through this helper.
+    """
+    for resource in template.find_resources("AWS::DynamoDB::Table").values():
+        if resource["Properties"].get("TableName") == table_name:
+            return resource
+    raise AssertionError(
+        f"No AWS::DynamoDB::Table resource with TableName={table_name!r} in template"
+    )
+
+
+# ---- Phase 2a — Users table -------------------------------------------
+
+
+def test_data_stack_users_table_keys_billing_ttl(cdk_env: cdk.Environment) -> None:
     template = _data_stack("dev", cdk_env)
-    tables = template.find_resources("AWS::DynamoDB::Table")
-    assert len(tables) == 1
-    props = next(iter(tables.values()))["Properties"]
-    assert props["TableName"] == "ContriCool-Users-dev"
+    props = _find_table(template, "ContriCool-Users-dev")["Properties"]
     assert props["BillingMode"] == "PAY_PER_REQUEST"
     keys = {k["AttributeName"]: k["KeyType"] for k in props["KeySchema"]}
     assert keys == {"PK": "HASH", "SK": "RANGE"}
@@ -922,11 +939,11 @@ def test_data_stack_table_keys_billing_ttl(cdk_env: cdk.Environment) -> None:
     assert ttl["Enabled"] is True
 
 
-def test_data_stack_gsi1_keys_and_projection_all(cdk_env: cdk.Environment) -> None:
+def test_data_stack_users_gsi1_keys_and_projection_all(
+    cdk_env: cdk.Environment,
+) -> None:
     template = _data_stack("dev", cdk_env)
-    props = next(iter(template.find_resources("AWS::DynamoDB::Table").values()))[
-        "Properties"
-    ]
+    props = _find_table(template, "ContriCool-Users-dev")["Properties"]
     gsis = props["GlobalSecondaryIndexes"]
     assert len(gsis) == 1
     gsi1 = gsis[0]
@@ -938,11 +955,13 @@ def test_data_stack_gsi1_keys_and_projection_all(cdk_env: cdk.Environment) -> No
     assert gsi1["Projection"]["ProjectionType"] == "ALL"
 
 
-def test_data_stack_pitr_streams_only_in_prod(cdk_env: cdk.Environment) -> None:
-    dev = next(iter(_data_stack("dev", cdk_env).find_resources("AWS::DynamoDB::Table").values()))[
+def test_data_stack_users_pitr_streams_only_in_prod(
+    cdk_env: cdk.Environment,
+) -> None:
+    dev = _find_table(_data_stack("dev", cdk_env), "ContriCool-Users-dev")[
         "Properties"
     ]
-    prod = next(iter(_data_stack("prod", cdk_env).find_resources("AWS::DynamoDB::Table").values()))[
+    prod = _find_table(_data_stack("prod", cdk_env), "ContriCool-Users-prod")[
         "Properties"
     ]
     # Dev: PITR off, no Stream.
@@ -955,11 +974,13 @@ def test_data_stack_pitr_streams_only_in_prod(cdk_env: cdk.Environment) -> None:
     assert prod["StreamSpecification"]["StreamViewType"] == "NEW_AND_OLD_IMAGES"
 
 
-def test_data_stack_kms_cmk_in_prod_default_in_dev(cdk_env: cdk.Environment) -> None:
-    dev = next(iter(_data_stack("dev", cdk_env).find_resources("AWS::DynamoDB::Table").values()))[
+def test_data_stack_users_kms_cmk_in_prod_default_in_dev(
+    cdk_env: cdk.Environment,
+) -> None:
+    dev = _find_table(_data_stack("dev", cdk_env), "ContriCool-Users-dev")[
         "Properties"
     ]
-    prod = next(iter(_data_stack("prod", cdk_env).find_resources("AWS::DynamoDB::Table").values()))[
+    prod = _find_table(_data_stack("prod", cdk_env), "ContriCool-Users-prod")[
         "Properties"
     ]
     # Dev uses AWS-managed key — SSESpecification absent or KMSMasterKeyId
@@ -977,11 +998,146 @@ def test_data_stack_kms_cmk_in_prod_default_in_dev(cdk_env: cdk.Environment) -> 
 def test_data_stack_users_table_retention_in_prod_destroy_in_dev(
     cdk_env: cdk.Environment,
 ) -> None:
-    dev = next(iter(_data_stack("dev", cdk_env).find_resources("AWS::DynamoDB::Table").values()))
-    prod = next(iter(_data_stack("prod", cdk_env).find_resources("AWS::DynamoDB::Table").values()))
+    dev = _find_table(_data_stack("dev", cdk_env), "ContriCool-Users-dev")
+    prod = _find_table(_data_stack("prod", cdk_env), "ContriCool-Users-prod")
     assert dev.get("DeletionPolicy") == "Delete"
     assert prod.get("DeletionPolicy") == "Retain"
     assert prod["Properties"].get("DeletionProtectionEnabled") is True
+
+
+# ---- Phase 4a — Transactions table ------------------------------------
+
+
+def test_data_stack_two_tables_synthesise(cdk_env: cdk.Environment) -> None:
+    """Phase 4a — DataStack now synthesises two DDB tables (Users +
+    Transactions). Both are PAY_PER_REQUEST and share the ``ttl`` TTL
+    attribute name."""
+    template = _data_stack("dev", cdk_env)
+    tables = template.find_resources("AWS::DynamoDB::Table")
+    assert len(tables) == 2, (
+        f"DataStack must synthesise exactly two tables; got "
+        f"{[t['Properties'].get('TableName') for t in tables.values()]}"
+    )
+    names = {t["Properties"]["TableName"] for t in tables.values()}
+    assert names == {"ContriCool-Users-dev", "ContriCool-Transactions-dev"}
+    for resource in tables.values():
+        props = resource["Properties"]
+        assert props["BillingMode"] == "PAY_PER_REQUEST"
+        ttl = props["TimeToLiveSpecification"]
+        assert ttl["AttributeName"] == "ttl"
+        assert ttl["Enabled"] is True
+
+
+def test_data_stack_transactions_keys_billing_ttl(
+    cdk_env: cdk.Environment,
+) -> None:
+    template = _data_stack("dev", cdk_env)
+    props = _find_table(template, "ContriCool-Transactions-dev")["Properties"]
+    assert props["BillingMode"] == "PAY_PER_REQUEST"
+    keys = {k["AttributeName"]: k["KeyType"] for k in props["KeySchema"]}
+    assert keys == {"PK": "HASH", "SK": "RANGE"}
+    attrs = {a["AttributeName"]: a["AttributeType"] for a in props["AttributeDefinitions"]}
+    assert attrs == {
+        "PK": "S",
+        "SK": "S",
+        "GSI1PK": "S",
+        "GSI1SK": "S",
+    }
+    ttl = props["TimeToLiveSpecification"]
+    assert ttl["AttributeName"] == "ttl"
+    assert ttl["Enabled"] is True
+
+
+def test_data_stack_transactions_gsi1_keys_and_projection_all(
+    cdk_env: cdk.Environment,
+) -> None:
+    template = _data_stack("dev", cdk_env)
+    props = _find_table(template, "ContriCool-Transactions-dev")["Properties"]
+    gsis = props["GlobalSecondaryIndexes"]
+    assert len(gsis) == 1
+    gsi1 = gsis[0]
+    assert gsi1["IndexName"] == "GSI1"
+    assert {k["AttributeName"]: k["KeyType"] for k in gsi1["KeySchema"]} == {
+        "GSI1PK": "HASH",
+        "GSI1SK": "RANGE",
+    }
+    assert gsi1["Projection"]["ProjectionType"] == "ALL"
+
+
+def test_data_stack_transactions_pitr_streams_only_in_prod(
+    cdk_env: cdk.Environment,
+) -> None:
+    dev = _find_table(
+        _data_stack("dev", cdk_env), "ContriCool-Transactions-dev"
+    )["Properties"]
+    prod = _find_table(
+        _data_stack("prod", cdk_env), "ContriCool-Transactions-prod"
+    )["Properties"]
+    # Dev: PITR off, no Stream.
+    assert dev.get("PointInTimeRecoverySpecification", {}).get(
+        "PointInTimeRecoveryEnabled"
+    ) in (False, None)
+    assert "StreamSpecification" not in dev
+    # Prod: PITR on, Stream NEW_AND_OLD_IMAGES.
+    assert prod["PointInTimeRecoverySpecification"]["PointInTimeRecoveryEnabled"] is True
+    assert prod["StreamSpecification"]["StreamViewType"] == "NEW_AND_OLD_IMAGES"
+
+
+def test_data_stack_transactions_kms_cmk_in_prod_default_in_dev(
+    cdk_env: cdk.Environment,
+) -> None:
+    dev = _find_table(
+        _data_stack("dev", cdk_env), "ContriCool-Transactions-dev"
+    )["Properties"]
+    prod = _find_table(
+        _data_stack("prod", cdk_env), "ContriCool-Transactions-prod"
+    )["Properties"]
+    dev_sse = dev.get("SSESpecification", {})
+    assert dev_sse.get("KMSMasterKeyId") in (None, "")
+    prod_sse = prod["SSESpecification"]
+    assert prod_sse["SSEEnabled"] is True
+    assert prod_sse["SSEType"] == "KMS"
+    assert prod_sse["KMSMasterKeyId"] is not None
+
+
+def test_data_stack_transactions_retention_in_prod_destroy_in_dev(
+    cdk_env: cdk.Environment,
+) -> None:
+    dev = _find_table(
+        _data_stack("dev", cdk_env), "ContriCool-Transactions-dev"
+    )
+    prod = _find_table(
+        _data_stack("prod", cdk_env), "ContriCool-Transactions-prod"
+    )
+    assert dev.get("DeletionPolicy") == "Delete"
+    assert prod.get("DeletionPolicy") == "Retain"
+    assert prod["Properties"].get("DeletionProtectionEnabled") is True
+
+
+def test_data_stack_transactions_table_outputs_present(
+    cdk_env: cdk.Environment,
+) -> None:
+    """Phase 4a — both name + arn outputs in dev, all three (incl. stream
+    arn) in prod."""
+    dev = _data_stack("dev", cdk_env)
+    prod = _data_stack("prod", cdk_env)
+
+    # Avoid relying on logical-id-stable Output keys; assert by description
+    # substring (descriptions are stable contracts in design.md).
+    def _output_descriptions(template: assertions.Template) -> list[str]:
+        outputs = template.find_outputs("*")
+        return [o.get("Description", "") for o in outputs.values()]
+
+    dev_descs = _output_descriptions(dev)
+    prod_descs = _output_descriptions(prod)
+
+    assert any("Transactions table name" in d for d in dev_descs)
+    assert any("Transactions table ARN" in d for d in dev_descs)
+    assert not any("Transactions DDB Stream ARN" in d for d in dev_descs)
+
+    assert any("Transactions table name" in d for d in prod_descs)
+    assert any("Transactions table ARN" in d for d in prod_descs)
+    assert any("Transactions DDB Stream ARN" in d for d in prod_descs)
 
 
 def test_monitoring_stack_prod_has_dashboard(cdk_env: cdk.Environment) -> None:

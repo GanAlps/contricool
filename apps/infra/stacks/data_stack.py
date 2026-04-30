@@ -1,19 +1,19 @@
 """``Contricool-{env}-Data`` stack.
 
-Creates the per-environment ``ContriCool-Users-<env>`` DynamoDB table
-described in ``specs/07-database-data-model/design.md``:
+Creates the per-environment DynamoDB tables described in
+``specs/07-database-data-model/design.md``:
 
-- Composite primary key (PK string, SK string).
-- One GSI (``GSI1``) — polymorphic across ``EMAIL#<hash>`` lookup hits and
-  ``USER#<max>`` reverse-friendship rows. ``ProjectionType.ALL`` so a META
-  hit returns the user's profile attributes directly.
-- ``ttl`` attribute for ``RATE#`` (and future ``IDEMPOTENCY#``) row expiry.
-- On-demand billing.
-- PITR + DDB Streams + customer-managed CMK in **prod only**.
+- ``ContriCool-Users-<env>`` — social-graph + identity table (Phase 2a).
+  Composite PK + SK; one GSI (``GSI1``) — polymorphic across
+  ``EMAIL#<hash>`` lookup hits and ``USER#<max>`` reverse-friendship rows.
+- ``ContriCool-Transactions-<env>`` — financial-ledger table (Phase 4a).
+  Composite PK + SK; one GSI (``GSI1``) keyed by ``USER#<user_id>`` for
+  Pattern #8 ("list my transactions, by date desc").
 
-Phase 4 will add a separate ``Contricool-{env}-Data`` table — Transactions —
-or extend this stack with a second table; the constructor is shaped so that
-addition is non-breaking.
+Both tables share the same per-environment encryption choice (AWS-managed in
+dev, customer-managed CMK in prod), the same ``ttl`` attribute name (used by
+``RATE#`` and ``IDEMPOTENCY#`` rows), on-demand billing, and prod-only PITR
++ DDB Streams + retain-on-destroy.
 """
 from __future__ import annotations
 
@@ -34,7 +34,14 @@ from constructs import Construct
 
 
 class DataStack(Stack):
-    """``ContriCool-Users-<env>`` DynamoDB table for one environment."""
+    """The two DynamoDB tables for one environment.
+
+    Public attributes (consumed by ``ApiStack`` via ``app.py``):
+
+    - ``users_table`` — Phase 2a.
+    - ``transactions_table`` — Phase 4a (Phase 4b wires it into the API
+      Lambda's IAM grants and env vars).
+    """
 
     def __init__(
         self,
@@ -95,6 +102,38 @@ class DataStack(Stack):
             projection_type=dynamodb.ProjectionType.ALL,
         )
 
+        self.transactions_table = dynamodb.Table(
+            self,
+            "TransactionsTable",
+            table_name=f"ContriCool-Transactions-{env_name}",
+            partition_key=dynamodb.Attribute(
+                name="PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            time_to_live_attribute="ttl",
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                point_in_time_recovery_enabled=is_prod,
+            ),
+            stream=dynamodb.StreamViewType.NEW_AND_OLD_IMAGES if is_prod else None,
+            removal_policy=RemovalPolicy.RETAIN if is_prod else RemovalPolicy.DESTROY,
+            deletion_protection=is_prod,
+            **encryption_kwargs,
+        )
+
+        self.transactions_table.add_global_secondary_index(
+            index_name="GSI1",
+            partition_key=dynamodb.Attribute(
+                name="GSI1PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="GSI1SK", type=dynamodb.AttributeType.STRING
+            ),
+            projection_type=dynamodb.ProjectionType.ALL,
+        )
+
         cdk.CfnOutput(
             self,
             "UsersTableName",
@@ -124,4 +163,32 @@ class DataStack(Stack):
                 "UsersTableStreamArn",
                 value=stream_arn,
                 description="Users DDB Stream ARN — no consumer at MVP.",
+            )
+
+        cdk.CfnOutput(
+            self,
+            "TransactionsTableName",
+            value=self.transactions_table.table_name,
+            description=(
+                f"Transactions table name → "
+                f"/contricool/{env_name}/ddb/transactions-table-name"
+            ),
+        )
+        cdk.CfnOutput(
+            self,
+            "TransactionsTableArn",
+            value=self.transactions_table.table_arn,
+            description="Transactions table ARN (consumed by API Lambda IAM policy).",
+        )
+        if is_prod:
+            txn_stream_arn = self.transactions_table.table_stream_arn
+            assert txn_stream_arn is not None, (
+                "Prod Transactions table has Streams enabled but "
+                "table_stream_arn is None — CDK lost the StreamSpecification."
+            )
+            cdk.CfnOutput(
+                self,
+                "TransactionsTableStreamArn",
+                value=txn_stream_arn,
+                description="Transactions DDB Stream ARN — no consumer at MVP.",
             )

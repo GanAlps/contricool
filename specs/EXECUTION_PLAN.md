@@ -374,10 +374,19 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 
 **Why this is two weeks**: split-method math, member/payer validation, cross-table TransactWriteItems, balance computation, and the highest-stakes UX (the add-transaction form) all live here.
 
+**Sub-phase rollout**:
+
+| Sub-phase | Scope | Spec |
+|---|---|---|
+| 4a | CDK Transactions DDB table (Data stack extension) | `specs/phase-4a-transactions-table/` |
+| 4b | Backend `transactions` feature (splits, balance, models, repository, service, routes, idempotency) — TBD |
+| 4c | Frontend transaction UI (dashboard, list, new-txn form, detail) — TBD |
+
 ### 4a — Transactions DDB table (CDK Data stack)
 
-- [ ] `ContriCool-Transactions-<env>`: PK + SK string, one GSI (GSI1 user→txns).
-- [ ] On-demand billing; PITR + Streams in prod; KMS CMK in prod.
+- [x] `ContriCool-Transactions-<env>`: PK + SK string, one GSI (GSI1 user→txns).
+- [x] On-demand billing; PITR + Streams in prod; KMS CMK in prod.
+- [x] Spec at `specs/phase-4a-transactions-table/`.
 
 ### 4b — Backend `transactions` feature (`apps/api/app/features/transactions/`)
 
