@@ -69,6 +69,10 @@ _PUBLIC_AUTH_PATHS: list[str] = [
     "/v1/auth/refresh",
     "/v1/auth/forgot-password",
     "/v1/auth/reset-password",
+    # Phase 6 — frontend telemetry sink. Public so error-boundary
+    # captures from logged-out screens still land. Per-route
+    # throttle below caps abuse.
+    "/v1/telemetry/error",
 ]
 
 # Per-route throttling — CLAUDE.md red-line 2 cost guardrails.
@@ -88,6 +92,16 @@ _ROUTE_THROTTLES: dict[str, dict[str, int]] = {
     "POST /v1/friends/add": {
         "ThrottlingRateLimit": 1,
         "ThrottlingBurstLimit": 5,
+    },
+    # Phase 6 — frontend telemetry sink. The route only logs to
+    # CloudWatch (no DDB / Cognito), so the limit is about log
+    # spend, not compute. 10 req/min/IP at WAF-level would be
+    # tighter; APIGW route throttling is per-stage not per-IP, so
+    # this is a stage-wide cap. WAF rate-based rule (Phase 6
+    # follow-up) gives the per-IP cap.
+    "POST /v1/telemetry/error": {
+        "ThrottlingRateLimit": 10,
+        "ThrottlingBurstLimit": 20,
     },
 }
 

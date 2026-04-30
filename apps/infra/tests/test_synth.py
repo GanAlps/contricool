@@ -587,6 +587,7 @@ def test_web_stack_csp_goes_through_security_headers_not_custom_headers(
 
 def test_monitoring_stack_dev_no_dashboard(cdk_env: cdk.Environment) -> None:
     app = cdk.App()
+    api_kwargs = _api_stack_auth_data_kwargs(app, cdk_env, env_name="dev")
     api = ApiStack(
         app,
         "Contricool-Dev-Api",
@@ -595,7 +596,7 @@ def test_monitoring_stack_dev_no_dashboard(cdk_env: cdk.Environment) -> None:
         snapstart=True,
         log_retention_days=14,
         xray_sampling_rate=1.0,
-        **_api_stack_auth_data_kwargs(app, cdk_env, env_name="dev"),
+        **api_kwargs,
     )
     mon = MonitoringStack(
         app,
@@ -604,13 +605,20 @@ def test_monitoring_stack_dev_no_dashboard(cdk_env: cdk.Environment) -> None:
         env_name="dev",
         api_lambda_alias=api.lambda_alias,
         api_gateway=api.api_gateway,
+        users_table=api_kwargs["users_table"],  # type: ignore[arg-type]
+        transactions_table=api_kwargs["transactions_table"],  # type: ignore[arg-type]
         alerts_topic_arn="arn:aws:sns:us-west-2:111111111111:Contricool-Alerts",
         include_dashboard=False,
     )
     template = assertions.Template.from_stack(mon)
     template.resource_count_is("AWS::CloudWatch::Dashboard", 0)
-    # Two alarms wired (lambda-errors, apigw-5xx).
-    template.resource_count_is("AWS::CloudWatch::Alarm", 2)
+    # Phase 6: 7 simple alarms (lambda-errors, lambda-throttles,
+    # lambda-duration-p95, apigw-5xx, apigw-4xx-burst,
+    # ddb-throttle-users, ddb-throttle-transactions) + 1 composite.
+    template.resource_count_is("AWS::CloudWatch::Alarm", 7)
+    template.resource_count_is("AWS::CloudWatch::CompositeAlarm", 1)
+    # Saved Logs Insights queries (one per row in _SAVED_QUERIES).
+    template.resource_count_is("AWS::Logs::QueryDefinition", 6)
 
 
 def _auth_stack(env_name: str, cdk_env: cdk.Environment) -> assertions.Template:
@@ -1151,6 +1159,7 @@ def test_monitoring_stack_prod_has_dashboard(cdk_env: cdk.Environment) -> None:
         "Cmk",
         f"arn:aws:kms:us-west-2:111111111111:key/{'p' * 32}",
     )
+    api_kwargs = _api_stack_auth_data_kwargs(app, cdk_env, env_name="prod")
     api = ApiStack(
         app,
         "Contricool-Prod-Api",
@@ -1160,7 +1169,7 @@ def test_monitoring_stack_prod_has_dashboard(cdk_env: cdk.Environment) -> None:
         log_retention_days=14,
         xray_sampling_rate=0.1,
         prod_cmk=cmk,
-        **_api_stack_auth_data_kwargs(app, cdk_env, env_name="prod"),
+        **api_kwargs,
     )
     mon = MonitoringStack(
         app,
@@ -1169,11 +1178,14 @@ def test_monitoring_stack_prod_has_dashboard(cdk_env: cdk.Environment) -> None:
         env_name="prod",
         api_lambda_alias=api.lambda_alias,
         api_gateway=api.api_gateway,
+        users_table=api_kwargs["users_table"],  # type: ignore[arg-type]
+        transactions_table=api_kwargs["transactions_table"],  # type: ignore[arg-type]
         alerts_topic_arn="arn:aws:sns:us-west-2:111111111111:Contricool-Alerts",
         include_dashboard=True,
     )
     template = assertions.Template.from_stack(mon)
     template.resource_count_is("AWS::CloudWatch::Dashboard", 1)
+    template.resource_count_is("AWS::CloudWatch::CompositeAlarm", 1)
 
 
 # ---- Phase 2c — Auth feature wiring assertions -----------------------
@@ -1475,6 +1487,10 @@ def test_api_stack_phase2c_no_unprotected_non_public_routes(
         "POST /v1/auth/forgot-password",
         "POST /v1/auth/reset-password",
         "GET /v1/health",
+        # Phase 6 — frontend telemetry sink. Public so a logged-out
+        # error-boundary capture still lands. Per-route throttle
+        # caps abuse.
+        "POST /v1/telemetry/error",
     }
     offenders: list[str] = []
     for props in routes.values():

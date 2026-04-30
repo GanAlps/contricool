@@ -232,6 +232,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/telemetry/error": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record Telemetry Event
+         * @description Log a structured frontend telemetry event.
+         *
+         *     ``level=error`` lands at WARNING (an alert-worthy frontend
+         *     crash), ``level=metric`` at INFO (one-shot performance sample).
+         */
+        post: operations["record_telemetry_event_v1_telemetry_error_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/transactions": {
         parameters: {
             query?: never;
@@ -636,6 +659,60 @@ export interface components {
             status: "PENDING_VERIFICATION";
             /** User Id */
             user_id: string;
+        };
+        /**
+         * TelemetryAck
+         * @description Trivial 202 acknowledgement so the client knows the event landed.
+         */
+        TelemetryAck: {
+            /**
+             * Accepted
+             * @default true
+             */
+            accepted: boolean;
+        };
+        /**
+         * TelemetryEvent
+         * @description One frontend telemetry event.
+         *
+         *     ``level=error`` is for uncaught errors / unhandled promise
+         *     rejections.  ``level=metric`` is for Core Web Vitals (LCP, INP,
+         *     CLS, FID, TTFB) plus other custom dimensions.
+         */
+        TelemetryEvent: {
+            /** Extra */
+            extra?: {
+                [key: string]: string | number | boolean | null;
+            };
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "error" | "metric";
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /** Name */
+            name: string;
+            /**
+             * Stack
+             * @default
+             */
+            stack: string;
+            /**
+             * Url
+             * @default
+             */
+            url: string;
+            /**
+             * User Agent
+             * @default
+             */
+            user_agent: string;
+            /** Value */
+            value?: number | null;
         };
         /**
          * Transaction
@@ -1153,6 +1230,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    record_telemetry_event_v1_telemetry_error_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TelemetryEvent"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelemetryAck"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
