@@ -180,10 +180,13 @@ for env_name, cfg in ENV_CONFIGS.items():
         env_name=env_name,
         api_lambda_alias=api.lambda_alias,
         api_gateway=api.api_gateway,
+        users_table=data.users_table,
+        transactions_table=data.transactions_table,
         alerts_topic_arn=shared.alerts_topic.topic_arn,
         include_dashboard=cfg["include_dashboard"],
     )
     monitoring.add_dependency(api)
+    monitoring.add_dependency(data)
 
     # Apply per-env tag to every resource in per-env stacks.
     cdk.Tags.of(auth).add("env", env_name)

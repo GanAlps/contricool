@@ -158,6 +158,11 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId, existing }
   const existingId = existing?.txn_id ?? null;
   const pickableFriendsRef = useRef(pickableFriends);
   pickableFriendsRef.current = pickableFriends;
+  // ``existing`` and ``pickableFriends`` are intentionally not in
+  // the deps; see the comment above. ``existingId`` covers
+  // identity changes; ``pickableFriendsRef`` lets us read the
+  // latest list at effect time without re-running on every refetch.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
     if (open) {
       idempotencyKeyRef.current = newIdempotencyKey();
@@ -180,9 +185,6 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId, existing }
       }
       setBannerMessage(null);
     }
-    // ``existing`` and ``pickableFriends`` are intentionally not in
-    // the deps. See comment above.
-    // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
   }, [open, reset, myUserId, myCurrency, prefillFriendId, existingId]);
 
   const watchedMembers = watch('members');
