@@ -452,9 +452,24 @@ class ApiStack(Stack):
         # Catch-all route — JWT authorizer attached via L1 override.
         # The L2 ``add_routes`` returns the created routes; we patch
         # each one to point at the authorizer.
+        #
+        # ``OPTIONS`` is deliberately NOT in this list so the API
+        # Gateway's auto-CORS-preflight handler answers OPTIONS
+        # requests without invoking the JWT authorizer. With
+        # ``HttpMethod.ANY`` (which includes OPTIONS), preflight
+        # requests from a localhost dev server fell into the
+        # authorized catch-all and returned 401 — breaking the
+        # whole local dev flow (Origin reported 2026-04-30).
         catchall_routes = self.api_gateway.add_routes(
             path="/{proxy+}",
-            methods=[apigwv2.HttpMethod.ANY],
+            methods=[
+                apigwv2.HttpMethod.GET,
+                apigwv2.HttpMethod.POST,
+                apigwv2.HttpMethod.PUT,
+                apigwv2.HttpMethod.DELETE,
+                apigwv2.HttpMethod.PATCH,
+                apigwv2.HttpMethod.HEAD,
+            ],
             integration=integration,
         )
         for route in catchall_routes:
