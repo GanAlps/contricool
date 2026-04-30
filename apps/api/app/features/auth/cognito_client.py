@@ -274,6 +274,55 @@ class CognitoClient:
         except ClientError as e:
             raise _map_error(e, path="logout") from e
 
+    # ----- Admin lifecycle (Phase 7 — account deletion) -----
+
+    def admin_disable_user(self, *, email: str) -> None:
+        """Mark a Cognito user as disabled. Existing access tokens
+        keep working until expiry (~1 h) but new ``InitiateAuth``
+        attempts return ``NotAuthorizedException``.
+
+        Idempotent: calling on an already-disabled user is a no-op
+        and returns success.
+        """
+        try:
+            _client().admin_disable_user(
+                UserPoolId=self._user_pool_id,
+                Username=_normalise(email),
+            )
+        except ClientError as e:
+            raise _map_error(e, path="admin_disable_user") from e
+
+    def admin_user_global_sign_out(self, *, email: str) -> None:
+        """Revoke every refresh token for a user. Pairs with
+        ``admin_disable_user`` so a deactivated account can't ride
+        an existing refresh token to keep working past disable.
+        """
+        try:
+            _client().admin_user_global_sign_out(
+                UserPoolId=self._user_pool_id,
+                Username=_normalise(email),
+            )
+        except ClientError as e:
+            raise _map_error(e, path="admin_user_global_sign_out") from e
+
+    def admin_delete_user(self, *, email: str) -> None:
+        """Permanently delete a Cognito user. Used by the cleanup
+        Lambda 30 days after a deactivation.
+
+        Tolerates ``UserNotFoundException`` — the cleanup Lambda
+        is idempotent across retries.
+        """
+        try:
+            _client().admin_delete_user(
+                UserPoolId=self._user_pool_id,
+                Username=_normalise(email),
+            )
+        except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "")
+            if code == "UserNotFoundException":
+                return
+            raise _map_error(e, path="admin_delete_user") from e
+
     # ----- Forgot password + reset -----
 
     def forgot_password(self, *, client_id: str, email: str) -> None:
