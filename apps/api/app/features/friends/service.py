@@ -231,10 +231,14 @@ def remove_friend(*, requester_id: str, target_id: str) -> None:
 def get_balance(
     *, requester_id: str, target_id: str
 ) -> FriendBalanceResponse:
-    """Return the balance with a friend.
+    """Return the real net balance with a friend.
 
-    Phase 3a returns zeros / null. Phase 4 fills in real numbers.
+    Phase 3a returned zero placeholders; Phase 4b fills in real numbers
+    by delegating the transaction-aware math to
+    :mod:`app.features.transactions.service`.
     """
+    from app.features.transactions import service as txn_service
+
     if target_id == requester_id:
         raise SelfActionForbiddenError()
     if not repo.friendship_exists(requester_id, target_id):
@@ -244,12 +248,15 @@ def get_balance(
     # signed up via Phase 2c. Defensive fallback to USD if it's somehow
     # missing.
     currency = me.currency if me else "USD"
+    net, status_, last_at = txn_service.compute_pair_balance(
+        requester_id=requester_id, friend_id=target_id
+    )
     return FriendBalanceResponse(
         user_id=target_id,
         currency=currency,  # type: ignore[arg-type]
-        net=Decimal("0.00"),
-        settlement_status="settled",
-        last_transaction_at=None,
+        net=net,
+        settlement_status=status_,
+        last_transaction_at=last_at,
     )
 
 

@@ -21,6 +21,7 @@ def _seed_config() -> None:
             cognito_ios_client_id="ios",
             cognito_android_client_id="android",
             users_table_name="ContriCool-Users-test",
+            transactions_table_name="ContriCool-Transactions-test",
             pii_salt="test-cursor-salt",
         )
     )

@@ -52,6 +52,7 @@ def test_refresh_with_empty_token_raises_missing_refresh_token() -> None:
             cognito_ios_client_id="y",
             cognito_android_client_id="z",
             users_table_name="t",
+            transactions_table_name="x",
             pii_salt="s",
         )
     )

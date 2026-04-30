@@ -55,6 +55,80 @@ components:
       - since
       title: AddFriendResponse
       type: object
+    CreateTransactionRequest:
+      additionalProperties: false
+      description: '``POST /v1/transactions`` request body.
+
+
+        Structural validation only here — per-method invariants are in
+
+        :func:`app.features.transactions.service.validate_create_payload`.'
+      properties:
+        amount:
+          anyOf:
+          - exclusiveMinimum: 0.0
+            type: number
+          - type: string
+          title: Amount
+        currency:
+          enum:
+          - USD
+          - INR
+          title: Currency
+          type: string
+        members:
+          items:
+            $ref: '#/components/schemas/MemberInput'
+          maxItems: 10
+          minItems: 1
+          title: Members
+          type: array
+        name:
+          maxLength: 120
+          minLength: 1
+          title: Name
+          type: string
+        note:
+          default: ''
+          maxLength: 500
+          title: Note
+          type: string
+        payers:
+          items:
+            $ref: '#/components/schemas/PayerInput'
+          maxItems: 10
+          minItems: 1
+          title: Payers
+          type: array
+        split_method:
+          enum:
+          - equal
+          - amount
+          - share
+          - percent
+          title: Split Method
+          type: string
+        txn_date:
+          format: date
+          title: Txn Date
+          type: string
+        type:
+          enum:
+          - expense
+          - settlement
+          title: Type
+          type: string
+      required:
+      - name
+      - type
+      - amount
+      - currency
+      - txn_date
+      - split_method
+      - members
+      - payers
+      title: CreateTransactionRequest
+      type: object
     ForgotPasswordRequest:
       additionalProperties: false
       properties:
@@ -194,6 +268,22 @@ components:
       - items
       title: ListFriendsResponse
       type: object
+    ListTransactionsResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/TransactionListItem'
+          title: Items
+          type: array
+        next_cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Next Cursor
+      required:
+      - items
+      title: ListTransactionsResponse
+      type: object
     LoginRequest:
       additionalProperties: false
       properties:
@@ -250,6 +340,100 @@ components:
       - name
       - currency
       title: LoginUser
+      type: object
+    Member:
+      description: One member, with the server-computed ``owed_amount``.
+      properties:
+        owed_amount:
+          title: Owed Amount
+          type: string
+        percent:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Percent
+        share:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Share
+        user_id:
+          title: User Id
+          type: string
+      required:
+      - user_id
+      - owed_amount
+      title: Member
+      type: object
+    MemberInput:
+      additionalProperties: false
+      description: One member entry on a create request.
+      properties:
+        owed_amount:
+          anyOf:
+          - minimum: 0.0
+            type: number
+          - type: string
+          - type: 'null'
+          title: Owed Amount
+        percent:
+          anyOf:
+          - maximum: 100.0
+            minimum: 0.0
+            type: number
+          - type: string
+          - type: 'null'
+          title: Percent
+        share:
+          anyOf:
+          - exclusiveMinimum: 0.0
+            type: number
+          - type: string
+          - type: 'null'
+          title: Share
+        user_id:
+          maxLength: 26
+          minLength: 26
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+          title: User Id
+          type: string
+      required:
+      - user_id
+      title: MemberInput
+      type: object
+    Payer:
+      properties:
+        paid_amount:
+          title: Paid Amount
+          type: string
+        user_id:
+          title: User Id
+          type: string
+      required:
+      - user_id
+      - paid_amount
+      title: Payer
+      type: object
+    PayerInput:
+      additionalProperties: false
+      description: One payer entry on a create request.
+      properties:
+        paid_amount:
+          anyOf:
+          - exclusiveMinimum: 0.0
+            type: number
+          - type: string
+          title: Paid Amount
+        user_id:
+          maxLength: 26
+          minLength: 26
+          pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+          title: User Id
+          type: string
+      required:
+      - user_id
+      - paid_amount
+      title: PayerInput
       type: object
     RefreshResponse:
       properties:
@@ -376,6 +560,148 @@ components:
       - user_id
       - status
       title: SignupResponse
+      type: object
+    Transaction:
+      description: '``POST /v1/transactions`` 201 + ``GET /v1/transactions/{id}``
+        200.'
+      properties:
+        amount:
+          title: Amount
+          type: string
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        creator_id:
+          title: Creator Id
+          type: string
+        currency:
+          enum:
+          - USD
+          - INR
+          title: Currency
+          type: string
+        deleted_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Deleted At
+        members:
+          items:
+            $ref: '#/components/schemas/Member'
+          title: Members
+          type: array
+        name:
+          title: Name
+          type: string
+        note:
+          title: Note
+          type: string
+        payers:
+          items:
+            $ref: '#/components/schemas/Payer'
+          title: Payers
+          type: array
+        split_method:
+          enum:
+          - equal
+          - amount
+          - share
+          - percent
+          title: Split Method
+          type: string
+        txn_date:
+          format: date
+          title: Txn Date
+          type: string
+        txn_id:
+          title: Txn Id
+          type: string
+        type:
+          enum:
+          - expense
+          - settlement
+          title: Type
+          type: string
+        updated_at:
+          format: date-time
+          title: Updated At
+          type: string
+      required:
+      - txn_id
+      - creator_id
+      - name
+      - type
+      - amount
+      - currency
+      - txn_date
+      - note
+      - split_method
+      - members
+      - payers
+      - created_at
+      - updated_at
+      title: Transaction
+      type: object
+    TransactionListItem:
+      description: One row in ``GET /v1/transactions`` — META + the requester's owed.
+      properties:
+        amount:
+          title: Amount
+          type: string
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        creator_id:
+          title: Creator Id
+          type: string
+        currency:
+          enum:
+          - USD
+          - INR
+          title: Currency
+          type: string
+        my_owed_amount:
+          title: My Owed Amount
+          type: string
+        name:
+          title: Name
+          type: string
+        split_method:
+          enum:
+          - equal
+          - amount
+          - share
+          - percent
+          title: Split Method
+          type: string
+        txn_date:
+          format: date
+          title: Txn Date
+          type: string
+        txn_id:
+          title: Txn Id
+          type: string
+        type:
+          enum:
+          - expense
+          - settlement
+          title: Type
+          type: string
+      required:
+      - txn_id
+      - name
+      - type
+      - amount
+      - currency
+      - txn_date
+      - split_method
+      - creator_id
+      - my_owed_amount
+      - created_at
+      title: TransactionListItem
       type: object
     ValidationError:
       properties:
@@ -753,3 +1079,110 @@ paths:
       summary: Health
       tags:
       - health
+  /transactions:
+    get:
+      operationId: list_transactions_route_v1_transactions_get
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          default: 20
+          maximum: 100
+          minimum: 1
+          title: Limit
+          type: integer
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+      - in: query
+        name: friend_id
+        required: false
+        schema:
+          anyOf:
+          - maxLength: 26
+            minLength: 26
+            pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
+            type: string
+          - type: 'null'
+          title: Friend Id
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTransactionsResponse'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: List Transactions Route
+      tags:
+      - transactions
+    post:
+      operationId: create_transaction_route_v1_transactions_post
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Idempotency-Key
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTransactionRequest'
+        required: true
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Create Transaction Route
+      tags:
+      - transactions
+  /transactions/{txn_id}:
+    get:
+      operationId: get_transaction_route_v1_transactions__txn_id__get
+      parameters:
+      - in: path
+        name: txn_id
+        required: true
+        schema:
+          title: Txn Id
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Get Transaction Route
+      tags:
+      - transactions

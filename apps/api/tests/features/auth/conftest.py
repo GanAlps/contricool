@@ -114,6 +114,7 @@ def auth_env(aws_credentials: None) -> Iterator[dict[str, object]]:
             cognito_ios_client_id=client_id,  # MVP: same ID across platforms in test
             cognito_android_client_id=client_id,
             users_table_name="ContriCool-Users-test",
+            transactions_table_name="ContriCool-Transactions-test",
             pii_salt="test-salt-for-deterministic-hashes",
         )
         config._set_for_tests(cfg)

@@ -31,6 +31,7 @@ _DEFAULT_TEST_CONFIG = AppConfig(
     cognito_ios_client_id="iosclienttest00000000000",
     cognito_android_client_id="androidclienttest0000000",
     users_table_name="ContriCool-Users-test",
+    transactions_table_name="ContriCool-Transactions-test",
     pii_salt="test-salt-for-deterministic-hashes",
 )
 
