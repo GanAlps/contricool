@@ -7,7 +7,6 @@ service to HTTP shapes.
 from __future__ import annotations
 
 import re
-from decimal import Decimal
 
 from email_validator import EmailNotValidError, validate_email
 
