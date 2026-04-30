@@ -368,9 +368,11 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 
 ---
 
-## Phase 4 — Transactions: Create + Read + List + Balance
+## Phase 4 — Transactions: Create + Read + List + Balance ✅ COMPLETE 2026-04-30
 
 **Goal**: Three users (all mutual friends) can create transactions among themselves, list their own transactions, list transactions with a specific friend, and see correct balances. Aligned with **Designs 5, 6, 7**.
+
+**Shipped via**: PR #32 (4a infra) + PR #33 (4b backend) + PR #34 (4c client) + PR #35 (deploy.yml fix for the `transactions-table-name` SSM param). All four merged + deployed to dev. Prod still on the previous (Phase 3) image at the time of this write — promote with a fresh Deploy run on `main` whenever ready.
 
 **Why this is two weeks**: split-method math, member/payer validation, cross-table TransactWriteItems, balance computation, and the highest-stakes UX (the add-transaction form) all live here.
 
@@ -454,7 +456,7 @@ Phases are sequential; a phase does not start until its predecessor's checkpoint
 ### Phase-4 verification (manual)
 
 - [ ] Sign up three test accounts A, B, C; cross-add as friends.
-- [ ] As A, open `/transactions/new`, create "Dinner at Joe's" $30, equal split among A/B/C, A paid all → 201.
+- [ ] As A, open `/transactions` (or `/dashboard`) → tap "Add transaction"; create "Dinner at Joe's" $30, equal split among A/B/C, A paid all → 201.
 - [ ] As A, open `/dashboard` → see "B owes you $10", "C owes you $10".
 - [ ] As B, open `/dashboard` → see "You owe A $10".
 - [ ] As B, open `/friends/<A's user_id>` → see the dinner transaction; balance shows -$10 (B owes A).
