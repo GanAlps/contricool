@@ -155,11 +155,13 @@ jobs:
           ios_client_id="$(fetch_output Contricool-Dev-Auth IosClientId)"
           android_client_id="$(fetch_output Contricool-Dev-Auth AndroidClientId)"
           users_table_name="$(fetch_output Contricool-Dev-Data UsersTableName)"
+          transactions_table_name="$(fetch_output Contricool-Dev-Data TransactionsTableName)"
           put_string /contricool/dev/cognito/user-pool-id "${user_pool_id}"
           put_string /contricool/dev/cognito/client-id-web "${web_client_id}"
           put_string /contricool/dev/cognito/client-id-ios "${ios_client_id}"
           put_string /contricool/dev/cognito/client-id-android "${android_client_id}"
           put_string /contricool/dev/ddb/users-table-name "${users_table_name}"
+          put_string /contricool/dev/ddb/transactions-table-name "${transactions_table_name}"
 
   smoke-dev:
     name: smoke-dev
@@ -364,11 +366,13 @@ jobs:
           ios_client_id="$(fetch_output Contricool-Prod-Auth IosClientId)"
           android_client_id="$(fetch_output Contricool-Prod-Auth AndroidClientId)"
           users_table_name="$(fetch_output Contricool-Prod-Data UsersTableName)"
+          transactions_table_name="$(fetch_output Contricool-Prod-Data TransactionsTableName)"
           put_string /contricool/prod/cognito/user-pool-id "${user_pool_id}"
           put_string /contricool/prod/cognito/client-id-web "${web_client_id}"
           put_string /contricool/prod/cognito/client-id-ios "${ios_client_id}"
           put_string /contricool/prod/cognito/client-id-android "${android_client_id}"
           put_string /contricool/prod/ddb/users-table-name "${users_table_name}"
+          put_string /contricool/prod/ddb/transactions-table-name "${transactions_table_name}"
 
   smoke-prod:
     name: smoke-prod
