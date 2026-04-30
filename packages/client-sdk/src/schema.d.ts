@@ -247,6 +247,12 @@ export interface paths {
          *
          *     ``level=error`` lands at WARNING (an alert-worthy frontend
          *     crash), ``level=metric`` at INFO (one-shot performance sample).
+         *
+         *     Every free-text field is scrubbed of email / phone / JWT / AWS
+         *     access-key shapes before logging. The ``extra`` dict is
+         *     additionally key-name-redacted so a frontend that posts
+         *     ``extra={"email": "x@y.com"}`` still emits ``"email":
+         *     "[REDACTED]"`` in the log line.
          */
         post: operations["record_telemetry_event_v1_telemetry_error_post"];
         delete?: never;

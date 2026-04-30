@@ -26,7 +26,12 @@ afterEach(() => {
 
 describe('reportWebVitals', () => {
   it('subscribes to LCP/INP/CLS/FCP/TTFB and posts each metric', async () => {
-    type Cb = (m: { name: string; value: number; rating?: string }) => void;
+    type Cb = (m: {
+      name: string;
+      value: number;
+      rating?: string;
+      navigationType?: string;
+    }) => void;
     const captured: { name: string; cb: Cb }[] = [];
     vi.doMock('web-vitals', () => ({
       onLCP: (cb: Cb) => captured.push({ name: 'LCP', cb }),
@@ -48,12 +53,20 @@ describe('reportWebVitals', () => {
     await reportWebVitals();
     expect(captured.map((c) => c.name).sort()).toEqual(['CLS', 'FCP', 'INP', 'LCP', 'TTFB']);
 
-    // Fire one of the metrics — the reporter should post.
-    captured[0]?.cb({ name: 'LCP', value: 2400, rating: 'good' });
+    // Fire one with a rating + navigationType — exercises the truthy
+    // ?? branches in `send`.
+    captured[0]?.cb({
+      name: 'LCP',
+      value: 2400,
+      rating: 'good',
+      navigationType: 'navigate',
+    });
+    // Fire a second with neither — exercises the null fallback
+    // (`m.rating ?? null`, `m.navigationType ?? null`).
+    captured[1]?.cb({ name: 'INP', value: 50 });
     await new Promise((r) => setTimeout(r, 50));
-    expect(posted).toHaveLength(1);
-    expect(posted[0]?.name).toBe('LCP');
-    expect(posted[0]?.value).toBe(2400);
+    expect(posted).toHaveLength(2);
+    expect(posted.map((p) => p.name).sort()).toEqual(['INP', 'LCP']);
   });
 
   it('is idempotent — second call is a no-op', async () => {

@@ -111,6 +111,59 @@ describe('postTelemetry', () => {
     expect((body as { message: string }).message).toBe('string-reason');
   });
 
+  it('falls back to default base URL when EXPO_PUBLIC_API_BASE_URL is unset', async () => {
+    // Exercise the ``?? '/v1'`` fallback in getBaseUrl. Test-setup
+    // pins the env var; we clear it for this test to take the
+    // fallback branch. The relative URL won't be intercepted by
+    // MSW (different origin resolution under jsdom) — telemetry
+    // swallows the resulting network failure, which itself
+    // exercises the catch-block branch.
+    const original = process.env.EXPO_PUBLIC_API_BASE_URL;
+    // ``delete`` is required here — assigning ``undefined`` to a
+    // process.env key sets the string "undefined", which is truthy
+    // and would not exercise the ``?? '/v1'`` nullish fallback.
+    // biome-ignore lint/performance/noDelete: see comment above
+    delete process.env.EXPO_PUBLIC_API_BASE_URL;
+    try {
+      // Should not throw (telemetry swallows network errors).
+      await expect(
+        postTelemetry({ level: 'error', name: 'fallback-base' }),
+      ).resolves.toBeUndefined();
+    } finally {
+      if (original !== undefined) {
+        process.env.EXPO_PUBLIC_API_BASE_URL = original;
+      }
+    }
+  });
+
+  it('reportError handles a non-Error non-string reason', async () => {
+    let body: unknown = null;
+    server.use(
+      http.post(`${BASE}/telemetry/error`, async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({ accepted: true }, { status: 202 });
+      }),
+    );
+    reportError('weird-reason', { unexpected: 'object' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect((body as { message: string }).message).toBe('unknown');
+  });
+
+  it('reportMetric without extra omits the bag', async () => {
+    let body: unknown = null;
+    server.use(
+      http.post(`${BASE}/telemetry/error`, async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({ accepted: true }, { status: 202 });
+      }),
+    );
+    reportMetric('TTFB', 120);
+    await new Promise((r) => setTimeout(r, 50));
+    const b = body as { value: number; extra?: unknown };
+    expect(b.value).toBe(120);
+    expect(b.extra).toBeUndefined();
+  });
+
   it('reportMetric attaches an extra dimension bag', async () => {
     let body: unknown = null;
     server.use(
