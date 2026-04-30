@@ -91,3 +91,77 @@ export function useCreateTransaction() {
     },
   });
 }
+
+export type UpdateTransactionArgs = {
+  txnId: string;
+  body: CreateTransactionRequest;
+  ifMatch: string;
+};
+
+export function useUpdateTransaction() {
+  const qc = useQueryClient();
+  return useMutation<Transaction, Error, UpdateTransactionArgs>({
+    mutationFn: async ({ txnId, body, ifMatch }) => {
+      const r = await apiClient.PUT('/transactions/{txn_id}', {
+        params: { path: { txn_id: txnId } },
+        body,
+        headers: { 'If-Match': ifMatch },
+      });
+      return r.data as Transaction;
+    },
+    onSuccess: (txn) => {
+      qc.invalidateQueries({ queryKey: transactionsKeys.all });
+      qc.invalidateQueries({ queryKey: transactionsKeys.one(txn.txn_id) });
+      for (const member of txn.members) {
+        qc.invalidateQueries({
+          queryKey: friendsKeys.balance(member.user_id),
+        });
+      }
+    },
+  });
+}
+
+export type DeleteTransactionArgs = {
+  txnId: string;
+  /** Used for cache-invalidation after the delete commits. */
+  involvedMemberIds: string[];
+};
+
+export function useDeleteTransaction() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, DeleteTransactionArgs>({
+    mutationFn: async ({ txnId }) => {
+      await apiClient.DELETE('/transactions/{txn_id}', {
+        params: { path: { txn_id: txnId } },
+      });
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: transactionsKeys.all });
+      qc.invalidateQueries({ queryKey: transactionsKeys.one(vars.txnId) });
+      for (const uid of vars.involvedMemberIds) {
+        qc.invalidateQueries({ queryKey: friendsKeys.balance(uid) });
+      }
+    },
+  });
+}
+
+export function useRestoreTransaction() {
+  const qc = useQueryClient();
+  return useMutation<Transaction, Error, string>({
+    mutationFn: async (txnId) => {
+      const r = await apiClient.POST('/transactions/{txn_id}/restore', {
+        params: { path: { txn_id: txnId } },
+      });
+      return r.data as Transaction;
+    },
+    onSuccess: (txn) => {
+      qc.invalidateQueries({ queryKey: transactionsKeys.all });
+      qc.invalidateQueries({ queryKey: transactionsKeys.one(txn.txn_id) });
+      for (const member of txn.members) {
+        qc.invalidateQueries({
+          queryKey: friendsKeys.balance(member.user_id),
+        });
+      }
+    },
+  });
+}

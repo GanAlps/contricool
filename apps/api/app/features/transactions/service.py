@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -25,16 +25,20 @@ from app.features.transactions import balance, splits
 from app.features.transactions import repository as repo
 from app.features.transactions.errors import (
     CurrencyMismatchError,
+    ForbiddenError,
+    GoneError,
     IdempotencyKeyReusedError,
     InvalidCursorError,
     InvalidDateError,
     MemberCountError,
+    NotDeletedError,
     NotFoundError,
     NotFriendError,
     OwedSumError,
     PaidSumError,
     PayerNotMemberError,
     PercentSumError,
+    PreconditionFailedError,
     SelfNotMemberError,
     ValidationFailedError,
 )
@@ -591,3 +595,319 @@ def compute_pair_balance(
         my_id=requester_id, friend_id=friend_id, txns=summaries
     )
     return result.net, result.settlement_status, result.last_transaction_at
+
+
+# ---- Update / Delete / Restore -------------------------------------
+
+
+# 30-day soft-delete restore window (Design 5/6/13).
+RESTORE_WINDOW_DAYS = 30
+
+
+def _meta_to_snapshot(
+    meta: repo.TxnMetaRow, members: list[repo.TxnMemberRow]
+) -> dict[str, Any]:
+    """Capture the prior META + MEMBER state for an AUDIT row."""
+    return {
+        "name": meta.name,
+        "type": meta.type,
+        "amount": str(meta.amount),
+        "currency": meta.currency,
+        "txn_date": meta.txn_date,
+        "note": meta.note,
+        "split_method": meta.split_method,
+        "payers": [
+            {
+                "user_id": str(p["user_id"]),
+                "paid_amount": str(p["paid_amount"]),
+            }
+            for p in meta.payers
+        ],
+        "members": [
+            {
+                "user_id": m.user_id,
+                "owed_amount": str(m.owed_amount),
+                "share": str(m.share) if m.share is not None else None,
+                "percent": str(m.percent) if m.percent is not None else None,
+            }
+            for m in members
+        ],
+        "updated_at": meta.updated_at,
+        "deleted_at": meta.deleted_at,
+    }
+
+
+def _load_for_mutation(
+    *, requester_id: str, txn_id: str
+) -> tuple[repo.TxnMetaRow, list[repo.TxnMemberRow]]:
+    """Read META + MEMBER rows for a mutation; raise the right error
+    if the requester isn't allowed to see the transaction.
+
+    - Missing META → 404 (mask).
+    - Non-member → 404 (mask) — never confirm existence to outsiders.
+    - Soft-deleted → returned as-is; callers (delete/restore) decide
+      whether that's an error.
+    """
+    meta = repo.get_meta(txn_id)
+    if meta is None:
+        raise NotFoundError()
+    if requester_id not in meta.member_ids:
+        raise NotFoundError()
+    members = repo.get_members(txn_id)
+    return meta, members
+
+
+def update_transaction(
+    *,
+    requester_id: str,
+    txn_id: str,
+    body: CreateTransactionRequest,
+    if_match: str,
+) -> Transaction:
+    """Edit an existing transaction.
+
+    - 404 to non-members (mask).
+    - 403 to non-creator members.
+    - 412 if ``if_match`` is stale (optimistic concurrency).
+    - 422 if the new shape fails validation (re-uses the create path).
+    - The currency is **immutable** — body.currency must equal the
+      stored currency, else 422 ``CURRENCY_MISMATCH``.
+    """
+    meta, prior_members = _load_for_mutation(
+        requester_id=requester_id, txn_id=txn_id
+    )
+    if meta.deleted_at is not None:
+        # Don't allow editing a soft-deleted txn — restore first.
+        raise NotFoundError()
+    if meta.creator_id != requester_id:
+        raise ForbiddenError()
+    if body.currency != meta.currency:
+        # Currency is locked at create time.
+        raise CurrencyMismatchError()
+
+    # Re-run the same per-method validation as create, including the
+    # SELF_NOT_MEMBER / NOT_FRIEND / OWED_SUM / etc. invariants. The
+    # currency check inside validate_create_payload already passes
+    # because we just enforced equality above.
+    validate_create_payload(requester_id=requester_id, body=body)
+
+    other_member_ids = [
+        m.user_id for m in body.members if m.user_id != requester_id
+    ]
+
+    # New currencies must still match (members may have changed).
+    currencies = repo.get_user_currencies([requester_id, *other_member_ids])
+    for uid in [requester_id, *other_member_ids]:
+        if currencies.get(uid) != body.currency:
+            logger.info(
+                "txn_update_currency_mismatch",
+                extra={"creator_id": requester_id, "txn_id": txn_id},
+            )
+            raise CurrencyMismatchError()
+
+    friend_ids = repo.get_friendship_ids(requester_id, other_member_ids)
+    missing = [uid for uid in other_member_ids if uid not in friend_ids]
+    if missing:
+        logger.info(
+            "txn_update_not_friend",
+            extra={"creator_id": requester_id, "txn_id": txn_id},
+        )
+        raise NotFriendError()
+
+    owed_amounts = _compute_owed_amounts(body)
+
+    members_payload = [
+        {
+            "user_id": m.user_id,
+            "owed_amount": owed,
+            "share": m.share,
+            "percent": m.percent,
+        }
+        for m, owed in zip(body.members, owed_amounts, strict=True)
+    ]
+    payers_payload = [
+        {"user_id": p.user_id, "paid_amount": p.paid_amount}
+        for p in body.payers
+    ]
+
+    # Fast-fail: caller's If-Match must match what we just read,
+    # else there's no point in attempting the DDB write. The DDB
+    # ConditionExpression below is still the authoritative guard
+    # against a race between this read and the transact write.
+    if if_match != meta.updated_at:
+        raise PreconditionFailedError()
+
+    new_member_ids = [m.user_id for m in body.members]
+    prior_member_ids = [m.user_id for m in prior_members]
+    prior_snapshot = _meta_to_snapshot(meta, prior_members)
+
+    inputs = repo.UpdateInputs(
+        txn_id=txn_id,
+        creator_id=requester_id,
+        name=body.name,
+        type=body.type,
+        amount=body.amount,
+        txn_date=body.txn_date.isoformat(),
+        note=body.note,
+        split_method=body.split_method,
+        members=members_payload,
+        payers=payers_payload,
+    )
+
+    try:
+        repo.update_transaction(
+            inputs=inputs,
+            if_match=if_match,
+            prior_snapshot=prior_snapshot,
+            prior_member_ids=prior_member_ids,
+            new_member_ids=new_member_ids,
+            other_member_ids=other_member_ids,
+            currency=body.currency,
+        )
+    except repo.StaleUpdatedAtError as exc:
+        # Race: someone else updated between our read and write. We
+        # surfaced ``meta.updated_at`` as the If-Match condition; if
+        # the caller's If-Match equalled our read but lost the race,
+        # we still report PRECONDITION_FAILED so the client refetches.
+        raise PreconditionFailedError() from exc
+
+    # Read back the post-update META + MEMBER rows so the response
+    # carries the actual server-side timestamps. The DDB
+    # ConditionExpression already enforced ``updated_at == :if_match``,
+    # so any stale-edit race surfaced as ``StaleUpdatedAtError``
+    # above.
+    new_meta, new_members = _load_for_mutation(
+        requester_id=requester_id, txn_id=txn_id
+    )
+
+    members_resp = [
+        Member(
+            user_id=mr.user_id,
+            owed_amount=mr.owed_amount,
+            share=mr.share,
+            percent=mr.percent,
+        )
+        for mr in new_members
+    ]
+    payers_resp = [
+        Payer(
+            user_id=str(p["user_id"]),
+            paid_amount=Decimal(str(p["paid_amount"])),
+        )
+        for p in new_meta.payers
+    ]
+    from datetime import date as _date
+
+    response = Transaction(
+        txn_id=new_meta.txn_id,
+        creator_id=new_meta.creator_id,
+        name=new_meta.name,
+        type=new_meta.type,  # type: ignore[arg-type]
+        amount=new_meta.amount,
+        currency=new_meta.currency,  # type: ignore[arg-type]
+        txn_date=_date.fromisoformat(new_meta.txn_date),
+        note=new_meta.note,
+        split_method=new_meta.split_method,  # type: ignore[arg-type]
+        members=members_resp,
+        payers=payers_resp,
+        created_at=datetime.fromisoformat(
+            new_meta.created_at.replace("Z", "+00:00")
+        ),
+        updated_at=datetime.fromisoformat(
+            new_meta.updated_at.replace("Z", "+00:00")
+        ),
+        deleted_at=None,
+    )
+    logger.info(
+        "txn_updated",
+        extra={
+            "creator_id": requester_id,
+            "txn_id": txn_id,
+            "type": body.type,
+            "split_method": body.split_method,
+            "member_count": len(body.members),
+        },
+    )
+    return response
+
+
+def delete_transaction(*, requester_id: str, txn_id: str) -> None:
+    """Soft-delete a transaction. Idempotent — second call is a no-op
+    (no error, no AUDIT row).
+
+    - 404 to non-members.
+    - 403 to non-creator members.
+    """
+    meta, members = _load_for_mutation(
+        requester_id=requester_id, txn_id=txn_id
+    )
+    if meta.creator_id != requester_id:
+        raise ForbiddenError()
+    if meta.deleted_at is not None:
+        # Already deleted — idempotent no-op.
+        return
+    prior_snapshot = _meta_to_snapshot(meta, members)
+    repo.soft_delete_transaction(
+        txn_id=txn_id,
+        creator_id=requester_id,
+        prior_snapshot=prior_snapshot,
+    )
+    logger.info(
+        "txn_deleted",
+        extra={"creator_id": requester_id, "txn_id": txn_id},
+    )
+
+
+def restore_transaction(*, requester_id: str, txn_id: str) -> Transaction:
+    """Clear ``deleted_at`` if within the 30-day grace window.
+
+    Reading a soft-deleted txn through the normal ``get_transaction``
+    path returns 404; this path bypasses that mask because the
+    requester is the creator who knows the txn used to exist.
+
+    - 404 if the txn doesn't exist or the requester isn't a member.
+    - 403 if the requester is a member but not the creator.
+    - 422 ``NOT_DELETED`` if the txn isn't soft-deleted.
+    - 410 ``GONE`` if the soft-delete is past the 30-day window.
+    """
+    meta = repo.get_meta(txn_id)
+    if meta is None:
+        raise NotFoundError()
+    if requester_id not in meta.member_ids:
+        raise NotFoundError()
+    if meta.creator_id != requester_id:
+        raise ForbiddenError()
+    if meta.deleted_at is None:
+        raise NotDeletedError()
+
+    deleted_at_dt = datetime.fromisoformat(
+        meta.deleted_at.replace("Z", "+00:00")
+    )
+    if datetime.now(UTC) - deleted_at_dt > _restore_window():
+        logger.info(
+            "txn_restore_gone",
+            extra={
+                "creator_id": requester_id,
+                "txn_id": txn_id,
+                "deleted_at": meta.deleted_at,
+            },
+        )
+        raise GoneError()
+
+    members = repo.get_members(txn_id)
+    prior_snapshot = _meta_to_snapshot(meta, members)
+    repo.restore_transaction(
+        txn_id=txn_id,
+        creator_id=requester_id,
+        prior_snapshot=prior_snapshot,
+    )
+    logger.info(
+        "txn_restored",
+        extra={"creator_id": requester_id, "txn_id": txn_id},
+    )
+    # Re-read so the response carries the new updated_at + cleared deleted_at.
+    return get_transaction(requester_id=requester_id, txn_id=txn_id)
+
+
+def _restore_window() -> timedelta:
+    return timedelta(days=RESTORE_WINDOW_DAYS)

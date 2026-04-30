@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, Depends, Header, status
+from fastapi import APIRouter, Depends, Header, Response, status
 
 from app.core.dependencies import current_principal
 from app.core.principal import Principal
@@ -93,5 +93,78 @@ def get_transaction_route(
 ) -> Transaction:
     txn_id = _validate_ulid("txn_id", txn_id)
     return service.get_transaction(
+        requester_id=principal.user_id, txn_id=txn_id
+    )
+
+
+@router.put(
+    "/{txn_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=Transaction,
+)
+def update_transaction_route(
+    txn_id: str,
+    body: CreateTransactionRequest,
+    principal: Principal = Depends(current_principal),  # noqa: B008
+    if_match: str | None = Header(default=None, alias="If-Match"),
+) -> Transaction:
+    """Edit an existing transaction.
+
+    The ``If-Match`` header carries the client's last-known
+    ``updated_at`` (ISO 8601 with trailing ``Z``). A stale value
+    surfaces as 412 ``PRECONDITION_FAILED`` — the client must
+    refetch and retry. Re-uses the create-time validation surface.
+    """
+    txn_id = _validate_ulid("txn_id", txn_id)
+    if not if_match:
+        raise ValidationFailedError(
+            field="If-Match", issue="header is required for updates"
+        )
+    return service.update_transaction(
+        requester_id=principal.user_id,
+        txn_id=txn_id,
+        body=body,
+        if_match=if_match,
+    )
+
+
+@router.delete(
+    "/{txn_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+def delete_transaction_route(
+    txn_id: str,
+    principal: Principal = Depends(current_principal),  # noqa: B008
+) -> Response:
+    """Soft-delete. Idempotent — second call is a 204 no-op.
+
+    Creator-only (403 to non-creator member, 404 to non-member).
+    """
+    txn_id = _validate_ulid("txn_id", txn_id)
+    service.delete_transaction(
+        requester_id=principal.user_id, txn_id=txn_id
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{txn_id}/restore",
+    status_code=status.HTTP_200_OK,
+    response_model=Transaction,
+)
+def restore_transaction_route(
+    txn_id: str,
+    principal: Principal = Depends(current_principal),  # noqa: B008
+) -> Transaction:
+    """Restore a soft-deleted transaction within the 30-day window.
+
+    - 404 to non-members.
+    - 403 to non-creator members.
+    - 422 ``NOT_DELETED`` if the txn wasn't soft-deleted.
+    - 410 ``GONE`` past the 30-day window.
+    """
+    txn_id = _validate_ulid("txn_id", txn_id)
+    return service.restore_transaction(
         requester_id=principal.user_id, txn_id=txn_id
     )

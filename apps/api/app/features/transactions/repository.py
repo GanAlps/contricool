@@ -376,13 +376,6 @@ class IdempotencyHit:
     record: dict[str, Any]
 
 
-def _to_ddb_value(v: Any) -> Any:
-    """boto3 ``Table`` resource takes Python types directly; nothing
-    to do — but we centralise here so the call sites read uniformly.
-    """
-    return v
-
-
 def create_transaction(
     *,
     inputs: CreateInputs,
@@ -684,3 +677,426 @@ def get_user_currencies(user_ids: list[str]) -> dict[str, str]:
         uid = str(item["PK"]).removeprefix("USER#")
         out[uid] = str(item["currency"])
     return out
+
+
+# ---- Update / soft-delete / restore --------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateInputs:
+    """Inputs for a transaction edit. Mirrors :class:`CreateInputs`
+    minus the immutable fields (``txn_id`` / ``creator_id`` /
+    ``currency``).
+    """
+
+    txn_id: str
+    creator_id: str
+    name: str
+    type: str
+    amount: Decimal
+    txn_date: str
+    note: str
+    split_method: str
+    members: list[dict[str, Any]]
+    payers: list[dict[str, Any]]
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateResult:
+    txn_id: str
+    updated_at: datetime
+    audit_id: str
+
+
+class StaleUpdatedAtError(Exception):
+    """Raised when the META update's ``updated_at`` precondition fails."""
+
+
+def update_transaction(
+    *,
+    inputs: UpdateInputs,
+    if_match: str,
+    prior_snapshot: dict[str, Any],
+    prior_member_ids: list[str],
+    new_member_ids: list[str],
+    other_member_ids: list[str],
+    currency: str,
+    updated_at: datetime | None = None,
+) -> UpdateResult:
+    """Atomically rewrite a transaction's META + MEMBER rows + AUDIT.
+
+    Slot order in the TransactWriteItems:
+      [0:N]            — friendship ConditionChecks (per ``other_member_ids``).
+      [N]              — META Update (sets the new attributes; precondition:
+                         ``creator_id`` matches AND ``updated_at == :if_match``
+                         AND ``deleted_at`` is null — disallow editing a
+                         soft-deleted txn).
+      [N+1 : N+1+R]    — MEMBER Deletes for any prior member who isn't in
+                         the new member list (``R`` = removed members).
+      [N+1+R : ...]    — MEMBER Puts for every new member (overwrite-or-create).
+      [last]           — AUDIT Put with the prior snapshot.
+
+    Raises:
+      :class:`StaleUpdatedAtError` if the META precondition fails (412).
+      :class:`NotFriendError` if any friendship ConditionCheck fails.
+    """
+    cfg = config.load()
+    audit_id = new_audit_id()
+    now = updated_at or _now_utc()
+    iso_now = _iso(now)
+
+    member_ids_sorted = sorted(new_member_ids)
+    removed = [uid for uid in prior_member_ids if uid not in set(new_member_ids)]
+
+    transact_items: list[dict[str, Any]] = []
+    for other_id in other_member_ids:
+        min_id, max_id = _canonical_pair(inputs.creator_id, other_id)
+        transact_items.append(
+            {
+                "ConditionCheck": {
+                    "TableName": cfg.users_table_name,
+                    "Key": {
+                        "PK": {"S": f"USER#{min_id}"},
+                        "SK": {"S": f"FRIEND#{max_id}"},
+                    },
+                    "ConditionExpression": "attribute_exists(PK)",
+                }
+            }
+        )
+
+    transact_items.append(
+        {
+            "Update": {
+                "TableName": cfg.transactions_table_name,
+                "Key": {
+                    "PK": {"S": f"TXN#{inputs.txn_id}"},
+                    "SK": {"S": "META"},
+                },
+                "UpdateExpression": (
+                    "SET #name = :name, #type = :type, amount = :amount, "
+                    "txn_date = :date, note = :note, split_method = :sm, "
+                    "payers = :payers, member_ids = :member_ids, "
+                    "updated_at = :now"
+                ),
+                "ConditionExpression": (
+                    "creator_id = :creator AND updated_at = :if_match "
+                    "AND attribute_not_exists(deleted_at)"
+                ),
+                "ExpressionAttributeNames": {
+                    "#name": "name",
+                    "#type": "type",
+                },
+                "ExpressionAttributeValues": {
+                    ":creator": {"S": inputs.creator_id},
+                    ":if_match": {"S": if_match},
+                    ":name": {"S": inputs.name},
+                    ":type": {"S": inputs.type},
+                    ":amount": {"N": str(inputs.amount)},
+                    ":date": {"S": inputs.txn_date},
+                    ":note": {"S": inputs.note or ""},
+                    ":sm": {"S": inputs.split_method},
+                    ":payers": {
+                        "L": [
+                            {
+                                "M": {
+                                    "user_id": {"S": p["user_id"]},
+                                    "paid_amount": {"N": str(p["paid_amount"])},
+                                }
+                            }
+                            for p in inputs.payers
+                        ]
+                    },
+                    ":member_ids": {
+                        "L": [{"S": uid} for uid in member_ids_sorted]
+                    },
+                    ":now": {"S": iso_now},
+                },
+            }
+        }
+    )
+
+    for uid in removed:
+        transact_items.append(
+            {
+                "Delete": {
+                    "TableName": cfg.transactions_table_name,
+                    "Key": {
+                        "PK": {"S": f"TXN#{inputs.txn_id}"},
+                        "SK": {"S": f"MEMBER#{uid}"},
+                    },
+                }
+            }
+        )
+
+    for m in inputs.members:
+        item: dict[str, Any] = {
+            "PK": {"S": f"TXN#{inputs.txn_id}"},
+            "SK": {"S": f"MEMBER#{m['user_id']}"},
+            "GSI1PK": {"S": f"USER#{m['user_id']}"},
+            "GSI1SK": {"S": f"TXN#{inputs.txn_date}#{inputs.txn_id}"},
+            "owed_amount": {"N": str(m["owed_amount"])},
+        }
+        if m.get("share") is not None:
+            item["share"] = {"N": str(m["share"])}
+        if m.get("percent") is not None:
+            item["percent"] = {"N": str(m["percent"])}
+        transact_items.append(
+            {
+                "Put": {
+                    "TableName": cfg.transactions_table_name,
+                    "Item": item,
+                }
+            }
+        )
+
+    audit_item: dict[str, Any] = {
+        "PK": {"S": f"TXN#{inputs.txn_id}"},
+        "SK": {"S": f"AUDIT#{audit_id}"},
+        "action": {"S": "update"},
+        "actor_id": {"S": inputs.creator_id},
+        "at": {"S": iso_now},
+        "snapshot": {"S": json.dumps(prior_snapshot, default=str)},
+    }
+    transact_items.append(
+        {
+            "Put": {
+                "TableName": cfg.transactions_table_name,
+                "Item": audit_item,
+            }
+        }
+    )
+
+    try:
+        _client().transact_write_items(TransactItems=transact_items)  # type: ignore[arg-type]
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code != "TransactionCanceledException":  # pragma: no cover - defensive
+            raise
+        reasons = exc.response.get("CancellationReasons") or []
+        # Friendship slots come first.
+        for i in range(len(other_member_ids)):
+            if (
+                i < len(reasons)
+                and reasons[i].get("Code") == "ConditionalCheckFailed"
+            ):
+                raise NotFriendError() from exc
+        # META update slot (next after the friendships).
+        meta_idx = len(other_member_ids)
+        if (
+            meta_idx < len(reasons)
+            and reasons[meta_idx].get("Code") == "ConditionalCheckFailed"
+        ):
+            raise StaleUpdatedAtError() from exc
+        raise  # pragma: no cover - defensive: TCE without a known reason
+
+    return UpdateResult(txn_id=inputs.txn_id, updated_at=now, audit_id=audit_id)
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteResult:
+    txn_id: str
+    deleted_at: datetime
+    audit_id: str
+
+
+def soft_delete_transaction(
+    *,
+    txn_id: str,
+    creator_id: str,
+    prior_snapshot: dict[str, Any],
+    deleted_at: datetime | None = None,
+) -> DeleteResult:
+    """Set ``deleted_at`` on the META row + write an AUDIT row.
+
+    Idempotent at the service layer (caller pre-checks). At the
+    repository layer the META update is conditioned on
+    ``creator_id`` so a non-creator never reaches this path; it is
+    not conditioned on ``deleted_at`` being null because the service
+    short-circuits the already-deleted case before calling here.
+    """
+    cfg = config.load()
+    audit_id = new_audit_id()
+    now = deleted_at or _now_utc()
+    iso_now = _iso(now)
+
+    transact_items: list[dict[str, Any]] = [
+        {
+            "Update": {
+                "TableName": cfg.transactions_table_name,
+                "Key": {
+                    "PK": {"S": f"TXN#{txn_id}"},
+                    "SK": {"S": "META"},
+                },
+                "UpdateExpression": (
+                    "SET deleted_at = :now, updated_at = :now"
+                ),
+                "ConditionExpression": "creator_id = :creator",
+                "ExpressionAttributeValues": {
+                    ":creator": {"S": creator_id},
+                    ":now": {"S": iso_now},
+                },
+            }
+        },
+        {
+            "Put": {
+                "TableName": cfg.transactions_table_name,
+                "Item": {
+                    "PK": {"S": f"TXN#{txn_id}"},
+                    "SK": {"S": f"AUDIT#{audit_id}"},
+                    "action": {"S": "delete"},
+                    "actor_id": {"S": creator_id},
+                    "at": {"S": iso_now},
+                    "snapshot": {"S": json.dumps(prior_snapshot, default=str)},
+                },
+            }
+        },
+    ]
+    _client().transact_write_items(TransactItems=transact_items)  # type: ignore[arg-type]
+    return DeleteResult(txn_id=txn_id, deleted_at=now, audit_id=audit_id)
+
+
+def restore_transaction(
+    *,
+    txn_id: str,
+    creator_id: str,
+    prior_snapshot: dict[str, Any],
+    restored_at: datetime | None = None,
+) -> DeleteResult:
+    """Clear ``deleted_at`` on the META row + write an AUDIT row.
+
+    The 30-day grace check lives in the service layer; this method
+    only enforces the creator condition.
+    """
+    cfg = config.load()
+    audit_id = new_audit_id()
+    now = restored_at or _now_utc()
+    iso_now = _iso(now)
+
+    transact_items: list[dict[str, Any]] = [
+        {
+            "Update": {
+                "TableName": cfg.transactions_table_name,
+                "Key": {
+                    "PK": {"S": f"TXN#{txn_id}"},
+                    "SK": {"S": "META"},
+                },
+                "UpdateExpression": (
+                    "SET updated_at = :now REMOVE deleted_at"
+                ),
+                "ConditionExpression": (
+                    "creator_id = :creator AND attribute_exists(deleted_at)"
+                ),
+                "ExpressionAttributeValues": {
+                    ":creator": {"S": creator_id},
+                    ":now": {"S": iso_now},
+                },
+            }
+        },
+        {
+            "Put": {
+                "TableName": cfg.transactions_table_name,
+                "Item": {
+                    "PK": {"S": f"TXN#{txn_id}"},
+                    "SK": {"S": f"AUDIT#{audit_id}"},
+                    "action": {"S": "restore"},
+                    "actor_id": {"S": creator_id},
+                    "at": {"S": iso_now},
+                    "snapshot": {"S": json.dumps(prior_snapshot, default=str)},
+                },
+            }
+        },
+    ]
+    _client().transact_write_items(TransactItems=transact_items)  # type: ignore[arg-type]
+    return DeleteResult(txn_id=txn_id, deleted_at=now, audit_id=audit_id)
+
+
+# ---- AUDIT helpers (for tests + cleanup) -----------------------------
+
+
+def get_audit_rows(txn_id: str) -> list[dict[str, Any]]:
+    """Return all AUDIT rows for a txn, oldest first by ULID order."""
+    response = _transactions_table().query(
+        KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+        ExpressionAttributeValues={
+            ":pk": f"TXN#{txn_id}",
+            ":sk": "AUDIT#",
+        },
+    )
+    return list(response.get("Items") or [])
+
+
+# ---- Cleanup helpers (cleanup Lambda) -------------------------------
+
+
+def hard_delete_transaction(txn_id: str, member_ids: list[str]) -> None:
+    """BatchWriteItem-delete the META + every MEMBER row for ``txn_id``.
+
+    Used by the cleanup Lambda after the 30-day grace window. AUDIT
+    rows are kept for an additional 90 days via TTL — see
+    ``set_audit_ttl_for_purge``.
+    """
+    cfg = config.load()
+    keys: list[dict[str, Any]] = [
+        {"PK": f"TXN#{txn_id}", "SK": "META"},
+        *[
+            {"PK": f"TXN#{txn_id}", "SK": f"MEMBER#{uid}"}
+            for uid in member_ids
+        ],
+    ]
+    # BatchWriteItem caps at 25 items per call; chunk just in case.
+    table_name = cfg.transactions_table_name
+    for chunk_start in range(0, len(keys), 25):
+        chunk = keys[chunk_start : chunk_start + 25]
+        _resource().batch_write_item(
+            RequestItems={
+                table_name: [{"DeleteRequest": {"Key": k}} for k in chunk]
+            }
+        )
+
+
+def set_audit_ttl_for_purge(txn_id: str, ttl_seconds_from_now: int) -> int:
+    """Set ``ttl`` on every AUDIT row for ``txn_id`` so DDB purges
+    them after the grace window. Returns the number of rows updated."""
+    rows = get_audit_rows(txn_id)
+    if not rows:
+        return 0
+    expire_at = int(_now_utc().timestamp()) + ttl_seconds_from_now
+    table = _transactions_table()
+    for row in rows:
+        table.update_item(
+            Key={"PK": row["PK"], "SK": row["SK"]},
+            UpdateExpression="SET #ttl = :ttl",
+            ExpressionAttributeNames={"#ttl": "ttl"},
+            ExpressionAttributeValues={":ttl": expire_at},
+        )
+    return len(rows)
+
+
+def scan_soft_deleted(
+    *, deleted_before_iso: str, limit: int = 50
+) -> list[TxnMetaRow]:
+    """Scan META rows soft-deleted before ``deleted_before_iso``.
+
+    Soft deletes are rare at MVP scale; a Scan with a filter is cheap
+    enough. Capped at ``limit`` per invocation so the cleanup Lambda
+    finishes within its budget.
+    """
+    response = _transactions_table().scan(
+        FilterExpression=(
+            "begins_with(SK, :meta) AND attribute_exists(deleted_at) "
+            "AND deleted_at < :before"
+        ),
+        ExpressionAttributeValues={
+            ":meta": "META",
+            ":before": deleted_before_iso,
+        },
+        Limit=limit * 4,  # filter applies post-scan; fetch a wider page
+    )
+    rows: list[TxnMetaRow] = []
+    for item in response.get("Items") or []:
+        if str(item.get("SK")) != "META":
+            continue
+        rows.append(_meta_from_item(item))
+        if len(rows) >= limit:
+            break
+    return rows

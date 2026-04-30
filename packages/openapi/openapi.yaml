@@ -1161,6 +1161,31 @@ paths:
       tags:
       - transactions
   /transactions/{txn_id}:
+    delete:
+      description: 'Soft-delete. Idempotent — second call is a 204 no-op.
+
+
+        Creator-only (403 to non-creator member, 404 to non-member).'
+      operationId: delete_transaction_route_v1_transactions__txn_id__delete
+      parameters:
+      - in: path
+        name: txn_id
+        required: true
+        schema:
+          title: Txn Id
+          type: string
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Delete Transaction Route
+      tags:
+      - transactions
     get:
       operationId: get_transaction_route_v1_transactions__txn_id__get
       parameters:
@@ -1184,5 +1209,90 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
           description: Validation Error
       summary: Get Transaction Route
+      tags:
+      - transactions
+    put:
+      description: 'Edit an existing transaction.
+
+
+        The ``If-Match`` header carries the client''s last-known
+
+        ``updated_at`` (ISO 8601 with trailing ``Z``). A stale value
+
+        surfaces as 412 ``PRECONDITION_FAILED`` — the client must
+
+        refetch and retry. Re-uses the create-time validation surface.'
+      operationId: update_transaction_route_v1_transactions__txn_id__put
+      parameters:
+      - in: path
+        name: txn_id
+        required: true
+        schema:
+          title: Txn Id
+          type: string
+      - in: header
+        name: If-Match
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: If-Match
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTransactionRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Update Transaction Route
+      tags:
+      - transactions
+  /transactions/{txn_id}/restore:
+    post:
+      description: 'Restore a soft-deleted transaction within the 30-day window.
+
+
+        - 404 to non-members.
+
+        - 403 to non-creator members.
+
+        - 422 ``NOT_DELETED`` if the txn wasn''t soft-deleted.
+
+        - 410 ``GONE`` past the 30-day window.'
+      operationId: restore_transaction_route_v1_transactions__txn_id__restore_post
+      parameters:
+      - in: path
+        name: txn_id
+        required: true
+        schema:
+          title: Txn Id
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      summary: Restore Transaction Route
       tags:
       - transactions

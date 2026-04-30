@@ -11,15 +11,21 @@ import { ApiErrorException } from '~/lib/api';
 import type { ApiError } from '~/lib/api';
 import { useAuthStore } from '~/lib/auth-store';
 import { useFriends } from '~/lib/queries/friends';
-import { useCreateTransaction } from '~/lib/queries/transactions';
+import { useCreateTransaction, useUpdateTransaction } from '~/lib/queries/transactions';
 import { AddTransactionSchema, type AddTransactionValues } from '~/lib/schemas';
-import type { CreateTransactionRequest } from '~/lib/types';
+import type { CreateTransactionRequest, Transaction } from '~/lib/types';
 
 type Props = {
   open: boolean;
   onClose: () => void;
   /** Optional: pre-select this friend in the member list. */
   prefillFriendId?: string;
+  /**
+   * Edit mode. When provided, the form pre-fills from this
+   * transaction and submit calls ``PUT`` (with ``If-Match``)
+   * instead of ``POST``. Currency is locked.
+   */
+  existing?: Transaction;
 };
 
 type SplitMethod = 'equal' | 'amount' | 'share' | 'percent';
@@ -42,6 +48,9 @@ const BANNER_ERRORS: Record<string, string> = {
   MIN_MEMBERS: 'Add at least one friend.',
   SETTLEMENT_SHAPE: 'Settlements need exactly two members.',
   MAX_MEMBERS: 'Too many members (max 10).',
+  // Edit-mode errors:
+  PRECONDITION_FAILED: 'Someone else changed this transaction. Refresh and try again.',
+  FORBIDDEN: "You can't edit this transaction.",
 };
 
 const TOAST_ERRORS: Record<string, string> = {
@@ -81,14 +90,17 @@ function newIdempotencyKey(): string {
   return `key-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function AddTransactionSheet({ open, onClose, prefillFriendId }: Props) {
+export function AddTransactionSheet({ open, onClose, prefillFriendId, existing }: Props) {
   const me = useAuthStore((s) => s.user);
   const friends = useFriends();
   const create = useCreateTransaction();
+  const update = useUpdateTransaction();
   const idempotencyKeyRef = useRef<string>(newIdempotencyKey());
   const [bannerMessage, setBannerMessage] = useState<string | null>(null);
   const [payerMode, setPayerMode] = useState<PayerMode>('single');
   const [payerAmounts, setPayerAmounts] = useState<Record<string, string>>({});
+
+  const isEdit = Boolean(existing);
 
   const myCurrency = me?.currency ?? 'USD';
   const myUserId = me?.user_id ?? '';
@@ -129,18 +141,43 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId }: Props) {
   // same-currency picker filter and land silently in the submitted
   // body (server would 422 on CURRENCY_MISMATCH and the user
   // couldn't remove the invisible chip).
+  // Re-init when the sheet opens *or* when the underlying existing
+  // transaction's identity changes. Within an open lifetime, a
+  // re-render that hands us a fresh-but-equivalent ``existing``
+  // (same ``txn_id``) or a refetch of the friends list must NOT
+  // wipe in-flight typing — that would reset every keystroke.
+  // We dedup via ``existingId`` and intentionally exclude
+  // ``pickableFriends`` from the deps; the latest snapshot is
+  // captured at effect time via the closure.
+  const existingId = existing?.txn_id ?? null;
+  const pickableFriendsRef = useRef(pickableFriends);
+  pickableFriendsRef.current = pickableFriends;
   useEffect(() => {
     if (open) {
       idempotencyKeyRef.current = newIdempotencyKey();
-      const safePrefill = pickableFriends.some((f) => f.user_id === prefillFriendId)
-        ? prefillFriendId
-        : undefined;
-      reset(defaultValues(myUserId, myCurrency, safePrefill));
+      if (existing) {
+        reset(editValuesFrom(existing));
+        const isMulti = existing.payers.length !== 1 || existing.payers[0]?.user_id !== myUserId;
+        setPayerMode(isMulti ? 'multiple' : 'single');
+        setPayerAmounts(
+          isMulti
+            ? Object.fromEntries(existing.payers.map((p) => [p.user_id, String(p.paid_amount)]))
+            : {},
+        );
+      } else {
+        const safePrefill = pickableFriendsRef.current.some((f) => f.user_id === prefillFriendId)
+          ? prefillFriendId
+          : undefined;
+        reset(defaultValues(myUserId, myCurrency, safePrefill));
+        setPayerMode('single');
+        setPayerAmounts({});
+      }
       setBannerMessage(null);
-      setPayerMode('single');
-      setPayerAmounts({});
     }
-  }, [open, reset, myUserId, myCurrency, prefillFriendId, pickableFriends]);
+    // ``existing`` and ``pickableFriends`` are intentionally not in
+    // the deps. See comment above.
+    // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
+  }, [open, reset, myUserId, myCurrency, prefillFriendId, existingId]);
 
   const watchedMembers = watch('members');
   const watchedAmount = watch('amount');
@@ -291,8 +328,20 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId }: Props) {
         members: memberRows,
         payers,
       };
-      await create.mutateAsync({ body, idempotencyKey: idempotencyKeyRef.current });
-      toast.success('Transaction added');
+      if (existing) {
+        await update.mutateAsync({
+          txnId: existing.txn_id,
+          body,
+          ifMatch: String(existing.updated_at),
+        });
+        toast.success('Transaction updated');
+      } else {
+        await create.mutateAsync({
+          body,
+          idempotencyKey: idempotencyKeyRef.current,
+        });
+        toast.success('Transaction added');
+      }
       onClose();
     } catch (err) {
       if (!isApiError(err)) {
@@ -698,5 +747,31 @@ function defaultValues(
     split_method: 'equal',
     members,
     payers: [{ user_id: myUserId, paid_amount: '0' }],
+  };
+}
+
+function editValuesFrom(t: Transaction): AddTransactionValues {
+  // Server timestamps + Decimals come through as strings on the wire;
+  // the form schema is string-typed too. `txn_date` is a string in
+  // the SDK shape (date-string).
+  const dateStr = String(t.txn_date);
+  return {
+    name: t.name,
+    type: t.type,
+    amount: String(t.amount),
+    currency: t.currency,
+    txn_date: dateStr,
+    note: t.note ?? '',
+    split_method: t.split_method,
+    members: t.members.map((m) => ({
+      user_id: m.user_id,
+      share: m.share != null ? String(m.share) : null,
+      percent: m.percent != null ? String(m.percent) : null,
+      owed_amount: m.owed_amount != null ? String(m.owed_amount) : null,
+    })),
+    payers: t.payers.map((p) => ({
+      user_id: p.user_id,
+      paid_amount: String(p.paid_amount),
+    })),
   };
 }

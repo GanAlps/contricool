@@ -259,8 +259,48 @@ export interface paths {
         };
         /** Get Transaction Route */
         get: operations["get_transaction_route_v1_transactions__txn_id__get"];
-        put?: never;
+        /**
+         * Update Transaction Route
+         * @description Edit an existing transaction.
+         *
+         *     The ``If-Match`` header carries the client's last-known
+         *     ``updated_at`` (ISO 8601 with trailing ``Z``). A stale value
+         *     surfaces as 412 ``PRECONDITION_FAILED`` — the client must
+         *     refetch and retry. Re-uses the create-time validation surface.
+         */
+        put: operations["update_transaction_route_v1_transactions__txn_id__put"];
         post?: never;
+        /**
+         * Delete Transaction Route
+         * @description Soft-delete. Idempotent — second call is a 204 no-op.
+         *
+         *     Creator-only (403 to non-creator member, 404 to non-member).
+         */
+        delete: operations["delete_transaction_route_v1_transactions__txn_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/transactions/{txn_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Transaction Route
+         * @description Restore a soft-deleted transaction within the 30-day window.
+         *
+         *     - 404 to non-members.
+         *     - 403 to non-creator members.
+         *     - 422 ``NOT_DELETED`` if the txn wasn't soft-deleted.
+         *     - 410 ``GONE`` past the 30-day window.
+         */
+        post: operations["restore_transaction_route_v1_transactions__txn_id__restore_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1186,6 +1226,103 @@ export interface operations {
         };
     };
     get_transaction_route_v1_transactions__txn_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                txn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Transaction"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_transaction_route_v1_transactions__txn_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string | null;
+            };
+            path: {
+                txn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTransactionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Transaction"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_transaction_route_v1_transactions__txn_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                txn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_transaction_route_v1_transactions__txn_id__restore_post: {
         parameters: {
             query?: never;
             header?: never;
