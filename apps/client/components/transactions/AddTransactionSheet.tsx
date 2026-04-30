@@ -100,10 +100,16 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId, existing }
   const [payerMode, setPayerMode] = useState<PayerMode>('single');
   const [payerAmounts, setPayerAmounts] = useState<Record<string, string>>({});
 
-  const isEdit = Boolean(existing);
-
-  const myCurrency = me?.currency ?? 'USD';
   const myUserId = me?.user_id ?? '';
+  // In edit mode the currency is locked to whatever the txn was
+  // created with — the server rejects a body that tries to change
+  // it (CurrencyMismatchError). Surface the txn's currency in the
+  // (read-only) display so a user editing a USD txn whose own
+  // account is INR doesn't see "INR" in the cell and assume it's
+  // editable.
+  const myCurrency: 'USD' | 'INR' = existing
+    ? (existing.currency as 'USD' | 'INR')
+    : (me?.currency ?? 'USD');
 
   // Friends in the same currency are pickable; cross-currency friends
   // are filtered out (the server would reject anyway).

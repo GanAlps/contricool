@@ -250,6 +250,49 @@ def test_update_as_non_member_returns_404_mask(
     assert resp.json()["error"]["code"] == "NOT_FOUND"
 
 
+def test_update_on_soft_deleted_txn_returns_404_mask(
+    txn_env: dict[str, object], txn_client: TestClient
+) -> None:
+    """Editing a soft-deleted txn must surface as 404 (mask) — not as
+    a successful update of a 'tombstone' row, and not as a different
+    error code that would confirm the txn used to exist.
+
+    Two layers enforce this:
+      - service.update_transaction returns NotFoundError when
+        meta.deleted_at is not None.
+      - The DDB ConditionExpression has ``attribute_not_exists(deleted_at)``
+        as belt-and-suspenders.
+    """
+    _seed_three_friends(txn_env)
+    txn = _create_dinner(txn_client)
+    txn_id = str(txn["txn_id"])
+    if_match = str(txn["updated_at"])
+
+    delete_resp = txn_client.delete(
+        f"/v1/transactions/{txn_id}",
+        headers=auth_headers_for(A, "a@x.com"),
+    )
+    assert delete_resp.status_code == 204
+
+    new_body = {
+        "name": "Dinner v2",
+        "type": "expense",
+        "amount": "36.00",
+        "currency": "USD",
+        "txn_date": "2026-04-29",
+        "split_method": "equal",
+        "members": [{"user_id": A}, {"user_id": B}, {"user_id": C}],
+        "payers": [{"user_id": A, "paid_amount": "36.00"}],
+    }
+    resp = txn_client.put(
+        f"/v1/transactions/{txn_id}",
+        json=new_body,
+        headers={**auth_headers_for(A, "a@x.com"), "If-Match": if_match},
+    )
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "NOT_FOUND"
+
+
 def test_update_with_stale_if_match_returns_412(
     txn_env: dict[str, object], txn_client: TestClient
 ) -> None:

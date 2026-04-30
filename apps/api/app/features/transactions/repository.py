@@ -1044,6 +1044,12 @@ def hard_delete_transaction(txn_id: str, member_ids: list[str]) -> None:
         ],
     ]
     # BatchWriteItem caps at 25 items per call; chunk just in case.
+    # TODO(cleanup-followup): retry ``UnprocessedItems`` from each
+    # response like ``batch_get_metas`` does for unprocessed keys.
+    # The cleanup Lambda runs daily and a residual item is picked up
+    # by the next run, so the bound is "at most one extra day
+    # before hard-delete completes" — acceptable at MVP, tighten
+    # when the Lambda is actually wired up via CDK.
     table_name = cfg.transactions_table_name
     for chunk_start in range(0, len(keys), 25):
         chunk = keys[chunk_start : chunk_start + 25]
