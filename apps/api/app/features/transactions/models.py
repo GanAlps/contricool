@@ -106,7 +106,13 @@ class CreateTransactionRequest(BaseModel):
         str, StringConstraints(max_length=NOTE_MAX, strip_whitespace=False)
     ] = ""
     split_method: SplitMethod
-    members: Annotated[list[MemberInput], Field(min_length=1, max_length=MAX_MEMBERS)]
+    # Pydantic surfaces ``min_length=2`` to the generated OpenAPI as
+    # ``minItems: 2`` so SDK consumers see the real domain minimum.
+    # Note: ``service.validate_create_payload`` keeps an equivalent
+    # ``MIN_MEMBERS`` check as defensive — the typed
+    # ``MemberCountError(code=MIN_MEMBERS)`` returns a stable error
+    # code if the validate path is ever called outside the route.
+    members: Annotated[list[MemberInput], Field(min_length=MIN_MEMBERS, max_length=MAX_MEMBERS)]
     payers: Annotated[list[PayerInput], Field(min_length=1, max_length=MAX_MEMBERS)]
 
 

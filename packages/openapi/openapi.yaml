@@ -80,7 +80,7 @@ components:
           items:
             $ref: '#/components/schemas/MemberInput'
           maxItems: 10
-          minItems: 1
+          minItems: 2
           title: Members
           type: array
         name:

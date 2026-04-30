@@ -233,18 +233,67 @@ def _txn_pk_from_gsi1sk(gsi1sk: str) -> str:
     return f"TXN#{parts[2]}" if len(parts) >= 3 else gsi1sk
 
 
+_BATCH_GET_MAX_KEYS = 100
+_BATCH_GET_MAX_RETRIES = 3
+
+
 def batch_get_metas(txn_ids: list[str]) -> dict[str, TxnMetaRow]:
-    """Hydrate META rows for a page of txn_ids."""
+    """Hydrate META rows for a list of txn_ids.
+
+    DDB ``BatchGetItem`` caps at **100 keys per call** and may return
+    ``UnprocessedKeys`` under throttle even below the size cap. We:
+
+    1. Chunk the input at 100 ids per call (so callers passing more
+       — e.g. ``compute_pair_balance`` with up to 500 shared txns —
+       don't trigger ``ValidationException``).
+    2. Retry the residual ``UnprocessedKeys`` up to
+       ``_BATCH_GET_MAX_RETRIES`` times; raise on persistent residual
+       so we don't silently drop transactions from a balance.
+
+    Mirrors the pattern in ``friends/repository.batch_get_user_metas``.
+    """
     if not txn_ids:
         return {}
     cfg = config.load()
     resource = _resource()
-    keys = [{"PK": f"TXN#{tid}", "SK": "META"} for tid in txn_ids]
-    response = resource.batch_get_item(
-        RequestItems={cfg.transactions_table_name: {"Keys": keys}}
-    )
-    items = response.get("Responses", {}).get(cfg.transactions_table_name, [])
-    return {row.txn_id: row for row in (_meta_from_item(item) for item in items)}
+    table_name = cfg.transactions_table_name
+    out: dict[str, TxnMetaRow] = {}
+
+    for chunk_start in range(0, len(txn_ids), _BATCH_GET_MAX_KEYS):
+        chunk = txn_ids[chunk_start : chunk_start + _BATCH_GET_MAX_KEYS]
+        pending: list[dict[str, str]] = [
+            {"PK": f"TXN#{tid}", "SK": "META"} for tid in chunk
+        ]
+        attempts_left = _BATCH_GET_MAX_RETRIES + 1
+        while pending and attempts_left > 0:
+            attempts_left -= 1
+            response = resource.batch_get_item(
+                RequestItems={table_name: {"Keys": pending}}
+            )
+            for item in response.get("Responses", {}).get(table_name, []):
+                row = _meta_from_item(item)
+                out[row.txn_id] = row
+            unprocessed = (
+                response.get("UnprocessedKeys", {})
+                .get(table_name, {})
+                .get("Keys", [])
+            )
+            pending = list(unprocessed)
+        if pending:
+            raise ClientError(
+                {
+                    "Error": {
+                        "Code": "ProvisionedThroughputExceededException",
+                        "Message": (
+                            "BatchGetItem returned unprocessed keys after "
+                            f"{_BATCH_GET_MAX_RETRIES + 1} attempts; "
+                            "aborting rather than dropping transactions."
+                        ),
+                    }
+                },
+                "BatchGetItem",
+            )
+    return out
 
 
 def get_idempotency_record(*, user_id: str, key: str) -> dict[str, Any] | None:

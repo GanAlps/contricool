@@ -45,21 +45,12 @@ def _eq(**kw: object) -> CreateTransactionRequest:
     )
 
 
-def test_validate_min_members() -> None:
-    body = _eq(
-        members=[MemberInput(user_id=A)],
-        payers=[PayerInput(user_id=A, paid_amount=Decimal("30.00"))],
-    )
-    with pytest.raises(MemberCountError) as exc:
-        validate_create_payload(requester_id=A, body=body)
-    assert exc.value.code == "MIN_MEMBERS"
-
-
-# NB: ``MAX_MEMBERS`` is enforced upstream by Pydantic
-# (``CreateTransactionRequest.members`` carries ``max_length=10``), so
-# the service-layer check is defensive and not exercisable via the
-# parsed-body path. The service-side branch is marked ``# pragma: no
-# cover`` in service.py.
+# NB: ``MIN_MEMBERS`` and ``MAX_MEMBERS`` are enforced upstream by
+# Pydantic (``CreateTransactionRequest.members`` carries
+# ``min_length=2`` + ``max_length=10`` so the generated OpenAPI
+# surfaces the real domain bounds to SDK consumers). The service-layer
+# checks are defensive and not exercisable via the parsed-body path —
+# both branches are marked ``# pragma: no cover`` in service.py.
 
 
 def test_validate_duplicate_member_ids() -> None:

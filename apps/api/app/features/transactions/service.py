@@ -103,7 +103,7 @@ def validate_create_payload(
     _ = _date  # silence ruff if unused
 
     n = len(body.members)
-    if n < MIN_MEMBERS:
+    if n < MIN_MEMBERS:  # pragma: no cover - Pydantic enforces upstream
         raise MemberCountError(
             code="MIN_MEMBERS",
             message=f"At least {MIN_MEMBERS} members required.",
