@@ -49,7 +49,7 @@ def delete_my_account(*, requester_id: str, requester_email: str) -> None:
 
     Idempotent: a second call returns success with no extra DDB write.
     """
-    result = me_repo.deactivate_user(requester_id)
+    result = me_repo.deactivate_user(requester_id, email=requester_email)
     # Cognito ops are idempotent on the server side. Run them
     # regardless of ``already_deactivated`` so a half-applied prior
     # call (e.g. DDB write succeeded but Cognito disable failed) is

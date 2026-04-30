@@ -131,9 +131,14 @@ def test_cleanup_with_no_audit_rows_returns_zero_marked(
 def test_cleanup_handler_entrypoint_returns_summary(
     txn_env: dict[str, object],
 ) -> None:
+    """Phase 7: handler runs both passes and returns nested summaries."""
     seed_user(txn_env, user_id=A, email="a@x.com", name="A")
     out = handler({}, None)
-    assert "candidates" in out
-    assert "hard_deleted" in out
-    assert "audit_rows_marked" in out
-    assert out["hard_deleted"] == 0
+    assert set(out.keys()) == {"transactions", "accounts"}
+    assert "candidates" in out["transactions"]
+    assert "hard_deleted" in out["transactions"]
+    assert "audit_rows_marked" in out["transactions"]
+    assert "candidates" in out["accounts"]
+    assert "hard_deleted" in out["accounts"]
+    assert out["transactions"]["hard_deleted"] == 0
+    assert out["accounts"]["hard_deleted"] == 0

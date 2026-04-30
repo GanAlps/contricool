@@ -63,8 +63,13 @@ class DeactivationResult:
     already_deactivated: bool
 
 
-def deactivate_user(user_id: str) -> DeactivationResult:
+def deactivate_user(user_id: str, *, email: str) -> DeactivationResult:
     """Set ``status=deactivated`` + ``deactivated_at`` on the META row.
+
+    Also records ``email_for_cleanup`` so the daily cleanup Lambda
+    can call ``cognito-idp:AdminDeleteUser`` 30 days later without
+    needing to re-derive the email from Cognito (which would
+    require an extra IAM action).
 
     Idempotent — if the row is already deactivated, returns the
     prior timestamp with ``already_deactivated=True``.
@@ -76,7 +81,7 @@ def deactivate_user(user_id: str) -> DeactivationResult:
             Key={"PK": f"USER#{user_id}", "SK": "META"},
             UpdateExpression=(
                 "SET #status = :deact, deactivated_at = :now, "
-                "updated_at = :now"
+                "updated_at = :now, email_for_cleanup = :email"
             ),
             ConditionExpression=(
                 "attribute_exists(PK) AND #status <> :deact"
@@ -85,6 +90,7 @@ def deactivate_user(user_id: str) -> DeactivationResult:
             ExpressionAttributeValues={
                 ":deact": "deactivated",
                 ":now": iso,
+                ":email": email,
             },
             ReturnValues="ALL_NEW",
         )
