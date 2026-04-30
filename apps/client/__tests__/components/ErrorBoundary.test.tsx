@@ -129,10 +129,43 @@ describe('installGlobalErrorTelemetry', () => {
     expect((last as { name: string }).name).toBe('unhandled-rejection');
   });
 
-  it('is idempotent', () => {
+  it('reports window "error" events as telemetry', async () => {
+    let posted = 0;
+    let last: unknown = null;
+    server.use(
+      http.post(`${BASE}/telemetry/error`, async ({ request }) => {
+        posted += 1;
+        last = await request.json();
+        return HttpResponse.json({ accepted: true }, { status: 202 });
+      }),
+    );
+    installGlobalErrorTelemetry();
+    const evt = new Event('error') as Event & {
+      error: unknown;
+      message: string;
+    };
+    (evt as { error: unknown }).error = new Error('window-failure');
+    (evt as { message: string }).message = 'window-failure';
+    window.dispatchEvent(evt);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(posted).toBe(1);
+    expect((last as { name: string }).name).toBe('window-error');
+  });
+
+  it('is idempotent — double-install does not double-fire', async () => {
+    let posted = 0;
+    server.use(
+      http.post(`${BASE}/telemetry/error`, () => {
+        posted += 1;
+        return HttpResponse.json({ accepted: true }, { status: 202 });
+      }),
+    );
     installGlobalErrorTelemetry();
     installGlobalErrorTelemetry();
-    // No assertion needed — the contract is "doesn't throw, doesn't
-    // double-register"; the dedup test above covers double-firing.
+    const evt = new Event('unhandledrejection') as Event & { reason: unknown };
+    (evt as { reason: unknown }).reason = new Error('once');
+    window.dispatchEvent(evt);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(posted).toBe(1);
   });
 });

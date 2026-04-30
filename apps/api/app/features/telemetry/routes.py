@@ -1,15 +1,24 @@
 """``POST /v1/telemetry/error`` — frontend error + web-vitals sink.
 
-Public route (no JWT required). Per-IP throttling lives at API
-Gateway (10/min/IP, set in ``api_stack.py``). The Lambda just logs
-the event into CloudWatch — no DDB write, no Cognito call — so the
-telemetry path is cheap even under bursts.
+Public route (no JWT required). Per-route throttling lives at API
+Gateway (10 RPS / 20 burst, set in ``api_stack.py``). The Lambda
+just logs the event into CloudWatch — no DDB write, no Cognito
+call — so the telemetry path is cheap even under bursts.
 
-CLAUDE.md red-line 1: never log raw email/phone/password/code/
-otp/Authorization/Cookie/secret/token/refresh_token. The
-log-redaction filter in ``app/core/observability.py`` already
-sanitises log records, so a malicious frontend can't post a
-"message": "<email>" and have it land verbatim.
+PII handling — CLAUDE.md red-line 1:
+
+The project's structured-log redactor in
+``app/core/observability.py`` is **key-name-based** — it scrubs
+values whose keys contain ``email`` / ``phone`` / ``token`` /
+etc. That doesn't help here because user-posted text lands under
+benign key names like ``telemetry_message``. We therefore run a
+value-level scrub (:func:`observability.scrub_pii_text`) over
+every free-text field before it hits the logger, plus a
+key-name redactor pass on the structured ``extra`` dict (which
+also catches a frontend that posts ``extra={"email": "..."}``).
+
+The Pydantic model's ``extra="forbid"`` is the third defence: a
+malicious frontend can't post arbitrary top-level keys.
 """
 from __future__ import annotations
 
@@ -17,7 +26,7 @@ import json
 
 from fastapi import APIRouter, status
 
-from app.core.observability import logger
+from app.core.observability import logger, redact, scrub_pii_text
 from app.features.telemetry.models import TelemetryAck, TelemetryEvent
 
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
@@ -34,6 +43,15 @@ def _truncate(s: str, limit: int) -> str:
     return s[: limit - 1] + "…"
 
 
+def _scrub_and_truncate(text: str, limit: int) -> str:
+    """Run value-level PII scrub first, then truncate.
+
+    Order matters — truncating first could split an email/JWT in
+    the middle and leave a substring that the regex misses.
+    """
+    return _truncate(scrub_pii_text(text), limit)
+
+
 @router.post(
     "/error",
     status_code=status.HTTP_202_ACCEPTED,
@@ -44,18 +62,29 @@ def record_telemetry_event(event: TelemetryEvent) -> TelemetryAck:
 
     ``level=error`` lands at WARNING (an alert-worthy frontend
     crash), ``level=metric`` at INFO (one-shot performance sample).
+
+    Every free-text field is scrubbed of email / phone / JWT / AWS
+    access-key shapes before logging. The ``extra`` dict is
+    additionally key-name-redacted so a frontend that posts
+    ``extra={"email": "x@y.com"}`` still emits ``"email":
+    "[REDACTED]"`` in the log line.
     """
+    # Key-name redact the dict, THEN serialise. The serialised JSON
+    # is also value-scrubbed in case a non-deny key (e.g. ``user_email``
+    # — actually caught by the redactor — but more importantly a
+    # totally benign key like ``url_param``) carries a PII string.
+    extra_redacted = redact(event.extra)
+    extra_json = scrub_pii_text(json.dumps(extra_redacted, default=str))
+
     payload = {
         "telemetry_event": event.name,
         "telemetry_level": event.level,
-        "telemetry_message": _truncate(event.message, 1_000),
-        "telemetry_url": _truncate(event.url, 1_000),
-        "telemetry_user_agent": _truncate(event.user_agent, 256),
+        "telemetry_message": _scrub_and_truncate(event.message, 1_000),
+        "telemetry_url": _scrub_and_truncate(event.url, 1_000),
+        "telemetry_user_agent": _scrub_and_truncate(event.user_agent, 256),
         "telemetry_value": event.value,
-        # ``extra`` rendered as a single JSON blob so the structured
-        # logger doesn't choke on dynamic-key fan-out.
-        "telemetry_extra": _truncate(json.dumps(event.extra), 1_000),
-        "telemetry_stack": _truncate(event.stack, _MAX_LOG_BYTES),
+        "telemetry_extra": _truncate(extra_json, 1_000),
+        "telemetry_stack": _scrub_and_truncate(event.stack, _MAX_LOG_BYTES),
     }
     if event.level == "error":
         logger.warning("frontend_telemetry", extra=payload)

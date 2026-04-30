@@ -130,6 +130,54 @@ def redact_json(blob: str) -> str:
     return json.dumps(redact(decoded), separators=(",", ":"))
 
 
+# ---- value-level PII scrubbers --------------------------------------
+#
+# The key-name redactor (above) catches dicts whose keys are sensitive
+# (e.g. ``email``, ``token``). It does NOT scrub free-text values like
+# user-posted error ``message`` strings, where the key is something
+# benign (``message``) but the value happens to contain an email or a
+# JWT. The frontend telemetry endpoint accepts arbitrary text and
+# logs it via ``logger.warning("frontend_telemetry", extra={...})`` —
+# so we need a value-level pass on the strings before they hit the
+# logger.
+
+# RFC-5322-shaped email address. Permissive but contains the common
+# shape; false positives (e.g. "version 1.0@2026") are rare and the
+# cost of an over-redact is one less debug clue, vs. the cost of a
+# leak which is irreversible.
+_EMAIL_RE = re.compile(
+    r"\b[A-Za-z0-9._%+\-]{1,64}@[A-Za-z0-9.\-]{1,253}\.[A-Za-z]{2,24}\b"
+)
+# E.164-ish phone numbers — the ``+`` is required so we don't strip
+# every number from a user's stack trace.
+_PHONE_RE = re.compile(r"\+\d{7,15}")
+# JWTs — three base64url segments separated by dots. Conservative
+# minimum length so we don't strip every dotted identifier.
+_JWT_RE = re.compile(r"\b[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\b")
+# AWS access keys (red-line 1 — never log).
+_AWS_KEY_RE = re.compile(r"\bAKIA[0-9A-Z]{16}\b")
+
+
+def scrub_pii_text(text: str) -> str:
+    """Strip likely-PII substrings from a free-text value.
+
+    Used by the frontend telemetry route on user-posted ``message``,
+    ``stack``, ``url``, and ``user_agent`` fields. Each match is
+    replaced with ``[REDACTED]`` regardless of length or kind.
+
+    The order matters: JWT before AWS-key + email so a token that
+    happens to contain an email-shape inside a base64-decoded blob
+    is fully scrubbed.
+    """
+    if not isinstance(text, str) or not text:
+        return text
+    out = _JWT_RE.sub(_REDACTED, text)
+    out = _AWS_KEY_RE.sub(_REDACTED, out)
+    out = _EMAIL_RE.sub(_REDACTED, out)
+    out = _PHONE_RE.sub(_REDACTED, out)
+    return out
+
+
 def _redacting_serializer(record: Any) -> str:
     """JSON-serialise a log record with redaction applied first."""
     return json.dumps(redact(record), default=str, separators=(",", ":"))

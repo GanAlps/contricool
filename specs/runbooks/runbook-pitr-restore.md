@@ -24,7 +24,7 @@ and migrate selectively.
 
 ```bash
 aws dynamodb restore-table-to-point-in-time \
-  --profile contricool-admin --region us-west-2 \
+  --profile contricool-admin --region <your-aws-region> \
   --source-table-name ContriCool-Users-prod \
   --target-table-name ContriCool-Users-prod-restored-YYYYMMDD \
   --restore-date-time 2026-04-30T01:30:00Z
@@ -49,7 +49,7 @@ duplicate storage:
 
 ```bash
 aws dynamodb delete-table \
-  --profile contricool-admin --region us-west-2 \
+  --profile contricool-admin --region <your-aws-region> \
   --table-name ContriCool-Users-prod-restored-YYYYMMDD
 ```
 

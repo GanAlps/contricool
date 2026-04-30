@@ -11,10 +11,9 @@ Alarms (per env):
 | apigw-4xx-burst             | ApiGateway 4xx (sum / 5m)                          | > 100     |
 | ddb-throttle-users          | DDB ThrottledRequests on Users                     | ≥ 1       |
 | ddb-throttle-transactions   | DDB ThrottledRequests on Transactions              | ≥ 1       |
-| lambda-cold-starts          | Lambda Init Duration p99 / 5m                      | > 6 s     |
 | lambda-duration-p95         | Lambda Duration p95 / 5m                           | > 4 s     |
 | lambda-throttles            | Lambda Throttles (sum / 5m)                        | ≥ 1       |
-| composite-site-down         | (lambda-errors OR apigw-5xx) AND any DDB throttle  | tripped   |
+| composite-site-down         | lambda-errors OR apigw-5xx                         | tripped   |
 
 The composite ``site-is-down`` alarm is the one that pages the
 oncall — single-source alarms (e.g. a one-off 5xx spike) page only
