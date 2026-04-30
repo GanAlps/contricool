@@ -431,10 +431,51 @@ describe('AddTransactionSheet — type control', () => {
     const body = seen[0]?.body as {
       type: string;
       split_method: string;
-      members: { user_id: string }[];
+      members: {
+        user_id: string;
+        owed_amount: string | null;
+        share: string | null;
+        percent: string | null;
+      }[];
+      payers: { user_id: string; paid_amount: string }[];
     };
     expect(body.type).toBe('settlement');
     expect(body.split_method).toBe('amount');
     expect(body.members).toHaveLength(2);
+
+    // Server contract for settlement (validate_create_payload):
+    //   payer member's owed_amount === '0.00'
+    //   the other member's owed_amount === full amount
+    //   share + percent are null on every member
+    const payerMember = body.members.find((m) => m.user_id === ME);
+    const otherMember = body.members.find((m) => m.user_id !== ME);
+    expect(payerMember?.owed_amount).toBe('0.00');
+    expect(otherMember?.owed_amount).toBe('10.00');
+    expect(payerMember?.share).toBeNull();
+    expect(payerMember?.percent).toBeNull();
+    expect(otherMember?.share).toBeNull();
+    expect(otherMember?.percent).toBeNull();
+
+    // Settlement is always single-payer.
+    expect(body.payers).toHaveLength(1);
+    expect(body.payers[0]?.user_id).toBe(ME);
+    expect(body.payers[0]?.paid_amount).toBe('10.00');
+  });
+
+  it('reverting to expense resets split_method to equal so per-member rows do not appear', async () => {
+    renderSheet();
+    await waitFor(() =>
+      expect(screen.getByTestId('add-txn-member-01J0000000000000000000BOB')).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByTestId('add-txn-member-01J0000000000000000000BOB'));
+    fireEvent.click(screen.getByTestId('add-txn-type-settlement'));
+    // Split picker is hidden in settlement mode.
+    expect(screen.queryByTestId('add-txn-split')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('add-txn-type-expense'));
+    // Back in expense mode, split picker appears, equal is active,
+    // and the per-member input rows are hidden (they only appear for
+    // amount/share/percent).
+    expect(screen.getByTestId('add-txn-split')).toBeInTheDocument();
+    expect(screen.queryByTestId('add-txn-member-inputs')).not.toBeInTheDocument();
   });
 });

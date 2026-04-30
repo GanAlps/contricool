@@ -46,6 +46,9 @@ const BANNER_ERRORS: Record<string, string> = {
 
 const TOAST_ERRORS: Record<string, string> = {
   IDEMPOTENCY_KEY_REUSED: 'This transaction was already created. Refresh to see it.',
+  // Should never reach here in practice — the form always supplies the
+  // header — but defensively map it so a regression in the wiring
+  // surfaces a useful message instead of the generic catch-all.
   IDEMPOTENCY_KEY_REQUIRED: 'Please retry the request.',
 };
 
@@ -73,6 +76,8 @@ function newIdempotencyKey(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }
+  // Tests + older runtimes: cryptographic-quality not required for an
+  // idempotency token, just uniqueness within a session.
   return `key-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
@@ -88,6 +93,8 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId }: Props) {
   const myCurrency = me?.currency ?? 'USD';
   const myUserId = me?.user_id ?? '';
 
+  // Friends in the same currency are pickable; cross-currency friends
+  // are filtered out (the server would reject anyway).
   const pickableFriends = useMemo(
     () => (friends.data?.items ?? []).filter((f) => f.currency === myCurrency),
     [friends.data, myCurrency],
@@ -113,6 +120,15 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId }: Props) {
     mode: 'onSubmit',
   });
 
+  // Reset everything when the sheet (re-)opens. Mint a fresh
+  // idempotency key per open so cancel-then-reopen never collides
+  // server-side.
+  //
+  // ``prefillFriendId`` is gated on ``pickableFriends`` so a
+  // cross-currency friend passed in via the prop doesn't bypass the
+  // same-currency picker filter and land silently in the submitted
+  // body (server would 422 on CURRENCY_MISMATCH and the user
+  // couldn't remove the invisible chip).
   useEffect(() => {
     if (open) {
       idempotencyKeyRef.current = newIdempotencyKey();
@@ -203,7 +219,12 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId }: Props) {
       setValue('split_method', 'amount', { shouldValidate: false });
       setPayerMode('single');
       setPayerAmounts({});
+      return;
     }
+    // Reverting to expense: the settlement flow forced split_method
+    // to 'amount'. Reset to the default so the user doesn't see
+    // surprise per-member input rows from the previous mode.
+    setValue('split_method', 'equal', { shouldValidate: false });
   };
 
   const onPayerModeChange = (next: PayerMode): void => {
@@ -216,17 +237,36 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId }: Props) {
   const submit = handleSubmit(async (values) => {
     setBannerMessage(null);
 
-    // Build per-member shape based on split method.
-    const memberRows = values.members.map((m) => ({
-      user_id: m.user_id,
-      share: values.split_method === 'share' && m.share != null ? m.share : null,
-      percent: values.split_method === 'percent' && m.percent != null ? m.percent : null,
-      owed_amount: values.split_method === 'amount' && m.owed_amount != null ? m.owed_amount : null,
-    }));
+    // For settlements, the server requires `owed_amount` per member:
+    // payer member = "0.00", the other member = the full transaction
+    // amount (see service.validate_create_payload). The form hides
+    // the per-member rows for settlement, so we compute the values
+    // here. Single payer = creator (settlement is always single-payer).
+    const settlementOwed = (memberId: string): string =>
+      memberId === myUserId ? '0.00' : values.amount;
 
-    // Build payers based on mode.
+    const memberRows = values.members.map((m) => {
+      if (values.type === 'settlement') {
+        return {
+          user_id: m.user_id,
+          share: null,
+          percent: null,
+          owed_amount: settlementOwed(m.user_id),
+        };
+      }
+      return {
+        user_id: m.user_id,
+        share: values.split_method === 'share' && m.share != null ? m.share : null,
+        percent: values.split_method === 'percent' && m.percent != null ? m.percent : null,
+        owed_amount:
+          values.split_method === 'amount' && m.owed_amount != null ? m.owed_amount : null,
+      };
+    });
+
+    // Build payers based on mode. Settlement is always single-payer
+    // (settlement collapse forces payerMode='single' on type change).
     let payers: { user_id: string; paid_amount: string }[];
-    if (payerMode === 'multiple') {
+    if (values.type === 'expense' && payerMode === 'multiple') {
       const entries = Object.entries(payerAmounts).filter(
         ([uid, amt]) => memberIds.has(uid) && amt.trim() !== '' && Number(amt) > 0,
       );
@@ -576,11 +616,6 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId }: Props) {
                 </View>
               );
             })}
-            {errors.payers ? (
-              <Text testID="add-txn-payers-error" className="mt-1 text-sm text-danger-600">
-                {(errors.payers as { message?: string }).message ?? 'Invalid payers'}
-              </Text>
-            ) : null}
           </View>
         ) : null}
 
@@ -616,12 +651,15 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId }: Props) {
             <Text className="text-xs text-neutral-500">
               You paid {watchedAmount || '0'} {myCurrency}
             </Text>
-            {errors.payers ? (
-              <Text testID="add-txn-payers-error" className="mt-1 text-sm text-danger-600">
-                {(errors.payers as { message?: string }).message ?? 'Invalid payers'}
-              </Text>
-            ) : null}
           </View>
+        ) : null}
+
+        {/* Single source of truth for payers field error so the testID
+            isn't duplicated across rendering branches. */}
+        {errors.payers ? (
+          <Text testID="add-txn-payers-error" className="mt-1 text-sm text-danger-600">
+            {(errors.payers as { message?: string }).message ?? 'Invalid payers'}
+          </Text>
         ) : null}
 
         <View className="flex-row justify-end gap-2 pt-2">
