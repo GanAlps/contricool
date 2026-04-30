@@ -322,3 +322,79 @@ describe('authMiddleware.onResponse', () => {
     expect(refreshCall.url).toMatch(/\/v1\/auth\/refresh$/);
   });
 });
+
+// ---- Native refresh path (Phase 8a) -------------------------------
+//
+// When `getRefreshToken` is provided and returns a non-null value, the
+// middleware sends the token in the body of /v1/auth/refresh and adds
+// `X-Client-Platform: native` so the backend dispatches to the body
+// branch. Web omits the option and the existing cookie path is used.
+
+describe('authMiddleware native refresh path', () => {
+  it('sends refresh token in body + X-Client-Platform header when getRefreshToken returns a value', async () => {
+    const mw = makeMw({
+      getTokens: () => ({ accessToken: 't', idToken: 'id' }),
+      getRefreshToken: async () => 'rt-from-secure-store',
+    });
+    fetchMock.mockResolvedValueOnce(
+      jsonRes({ access_token: 'new-a', id_token: 'new-i', expires_in: 3600 }, 200),
+    );
+    fetchMock.mockResolvedValueOnce(jsonRes({ ok: true }, 200));
+    const req = new Request('http://localhost/v1/me');
+    const res = jsonRes({ error: { code: 'UNAUTHENTICATED', message: 'x', request_id: 'r' } }, 401);
+    await mw.onResponse!({ request: req, response: res, schemaPath: '', params: {} } as never);
+    const refreshCall = fetchMock.mock.calls[0]?.[0] as Request;
+    expect(refreshCall.headers.get('x-client-platform')).toBe('native');
+    expect(refreshCall.headers.get('content-type')).toBe('application/json');
+    const refreshBody = await refreshCall.text();
+    expect(JSON.parse(refreshBody)).toEqual({ refresh_token: 'rt-from-secure-store' });
+  });
+
+  it('falls back to empty-body refresh when getRefreshToken returns null', async () => {
+    const mw = makeMw({
+      getTokens: () => ({ accessToken: 't', idToken: 'id' }),
+      getRefreshToken: () => null,
+    });
+    fetchMock.mockResolvedValueOnce(
+      jsonRes({ access_token: 'new-a', id_token: 'new-i', expires_in: 3600 }, 200),
+    );
+    fetchMock.mockResolvedValueOnce(jsonRes({ ok: true }, 200));
+    const req = new Request('http://localhost/v1/me');
+    const res = jsonRes({ error: { code: 'UNAUTHENTICATED', message: 'x', request_id: 'r' } }, 401);
+    await mw.onResponse!({ request: req, response: res, schemaPath: '', params: {} } as never);
+    const refreshCall = fetchMock.mock.calls[0]?.[0] as Request;
+    expect(refreshCall.headers.get('x-client-platform')).toBeNull();
+    const refreshBody = await refreshCall.text();
+    expect(refreshBody).toBe('');
+  });
+
+  it('omits X-Client-Platform when getRefreshToken is undefined (web default)', async () => {
+    const mw = makeMw({ getTokens: () => ({ accessToken: 't', idToken: 'id' }) });
+    fetchMock.mockResolvedValueOnce(
+      jsonRes({ access_token: 'new-a', id_token: 'new-i', expires_in: 3600 }, 200),
+    );
+    fetchMock.mockResolvedValueOnce(jsonRes({ ok: true }, 200));
+    const req = new Request('http://localhost/v1/me');
+    const res = jsonRes({ error: { code: 'UNAUTHENTICATED', message: 'x', request_id: 'r' } }, 401);
+    await mw.onResponse!({ request: req, response: res, schemaPath: '', params: {} } as never);
+    const refreshCall = fetchMock.mock.calls[0]?.[0] as Request;
+    expect(refreshCall.headers.get('x-client-platform')).toBeNull();
+  });
+
+  it('handles a sync getRefreshToken returning a string', async () => {
+    const mw = makeMw({
+      getTokens: () => ({ accessToken: 't', idToken: 'id' }),
+      getRefreshToken: () => 'sync-rt',
+    });
+    fetchMock.mockResolvedValueOnce(
+      jsonRes({ access_token: 'a', id_token: 'i', expires_in: 1 }, 200),
+    );
+    fetchMock.mockResolvedValueOnce(jsonRes({ ok: true }, 200));
+    const req = new Request('http://localhost/v1/me');
+    const res = jsonRes({ error: { code: 'UNAUTHENTICATED', message: 'x', request_id: 'r' } }, 401);
+    await mw.onResponse!({ request: req, response: res, schemaPath: '', params: {} } as never);
+    const refreshCall = fetchMock.mock.calls[0]?.[0] as Request;
+    const refreshBody = await refreshCall.text();
+    expect(JSON.parse(refreshBody)).toEqual({ refresh_token: 'sync-rt' });
+  });
+});

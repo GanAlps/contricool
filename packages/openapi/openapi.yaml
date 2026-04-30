@@ -454,6 +454,11 @@ components:
         id_token:
           title: Id Token
           type: string
+        refresh_token:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Refresh Token
         user:
           $ref: '#/components/schemas/LoginUser'
       required:
@@ -631,6 +636,16 @@ components:
       - user_id
       - paid_amount
       title: PayerInput
+      type: object
+    RefreshRequest:
+      additionalProperties: false
+      properties:
+        refresh_token:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Refresh Token
+      title: RefreshRequest
       type: object
     RefreshResponse:
       properties:
@@ -1174,6 +1189,15 @@ paths:
   /auth/login:
     post:
       operationId: login_v1_auth_login_post
+      parameters:
+      - in: header
+        name: x-client-platform
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Client-Platform
       requestBody:
         content:
           application/json:
@@ -1217,6 +1241,14 @@ paths:
           - type: string
           - type: 'null'
           title: Rt
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+              - $ref: '#/components/schemas/RefreshRequest'
+              - type: 'null'
+              title: Body
       responses:
         '200':
           content:
