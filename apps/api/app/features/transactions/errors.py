@@ -172,3 +172,61 @@ class InvalidCursorError(AuthError):
             http_status=422,
             message="Pagination cursor is invalid.",
         )
+
+
+class ForbiddenError(AuthError):
+    """Non-creator tried to mutate a transaction (edit / delete / restore).
+
+    Distinct from the 404 mask used for non-members: a member who
+    isn't the creator gets a useful error code so the client can
+    render a precise "you can't edit this" message. Non-members
+    still get 404 (red-line 3 — never confirm existence to outsiders).
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            code="FORBIDDEN",
+            http_status=403,
+            message="Only the creator can modify this transaction.",
+        )
+
+
+class PreconditionFailedError(AuthError):
+    """``If-Match`` header didn't match the current ``updated_at``.
+
+    Optimistic concurrency: a stale edit from a second tab loses to
+    the first writer. The client refetches and re-attempts.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            code="PRECONDITION_FAILED",
+            http_status=412,
+            message="The transaction was modified elsewhere. Refresh and try again.",
+        )
+
+
+class GoneError(AuthError):
+    """Soft-deleted transaction is past the 30-day restore window.
+
+    410 GONE is the precise HTTP semantic — the resource existed but
+    is no longer recoverable.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            code="GONE",
+            http_status=410,
+            message="The 30-day restore window has expired.",
+        )
+
+
+class NotDeletedError(AuthError):
+    """``POST :restore`` on a transaction that isn't soft-deleted."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code="NOT_DELETED",
+            http_status=422,
+            message="Transaction is not deleted.",
+        )

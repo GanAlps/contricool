@@ -256,15 +256,21 @@ class ApiStack(Stack):
         # Phase 4b — Transactions table grants. ``TransactWriteItems``
         # is required for the create-transaction cross-table write
         # spanning Users (friendship ConditionChecks) + Transactions
-        # (META + N MEMBERs + AUDIT + IDEMPOTENCY rows). No
-        # ``DeleteItem`` on this table — soft-delete is an
-        # ``UpdateItem`` (``deleted_at = now``); hard-delete is the
-        # Phase 6 cleanup-job's concern.
+        # (META + N MEMBERs + AUDIT + IDEMPOTENCY rows).
+        #
+        # Phase 5 adds ``DeleteItem`` for the edit transact: when an
+        # update drops a member, the prior MEMBER row is removed.
+        # Soft-delete itself is still an ``UpdateItem`` setting
+        # ``deleted_at = now``. Hard-delete (post-30-day cleanup)
+        # belongs to a separate cleanup Lambda with its own narrow
+        # role — it will get ``Scan`` + ``BatchWriteItem`` *only*,
+        # not via this Lambda.
         transactions_table.grant(
             self.lambda_function,
             "dynamodb:GetItem",
             "dynamodb:PutItem",
             "dynamodb:UpdateItem",
+            "dynamodb:DeleteItem",
             "dynamodb:Query",
             "dynamodb:BatchGetItem",
             "dynamodb:ConditionCheckItem",

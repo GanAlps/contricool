@@ -462,6 +462,137 @@ describe('AddTransactionSheet — type control', () => {
     expect(body.payers[0]?.paid_amount).toBe('10.00');
   });
 
+  it('Phase 5: edit-mode hydrates from existing txn and PUTs with If-Match', async () => {
+    const seen: { ifMatch: string | null; body: unknown }[] = [];
+    server.use(
+      http.put(`${BASE}/transactions/:txnId`, async ({ request }) => {
+        seen.push({
+          ifMatch: request.headers.get('if-match'),
+          body: await request.json(),
+        });
+        return HttpResponse.json(
+          {
+            txn_id: 'tx1',
+            creator_id: ME,
+            name: 'Dinner edited',
+            type: 'expense',
+            amount: '40.00',
+            currency: 'USD',
+            txn_date: '2026-04-29',
+            note: '',
+            split_method: 'equal',
+            members: [
+              { user_id: ME, owed_amount: '20.00', share: null, percent: null },
+              {
+                user_id: '01J0000000000000000000BOB',
+                owed_amount: '20.00',
+                share: null,
+                percent: null,
+              },
+            ],
+            payers: [{ user_id: ME, paid_amount: '40.00' }],
+            created_at: '2026-04-29T20:00:00Z',
+            updated_at: '2026-04-29T20:05:00Z',
+            deleted_at: null,
+          },
+          { status: 200 },
+        );
+      }),
+    );
+    const existing = {
+      txn_id: 'tx1',
+      creator_id: ME,
+      name: 'Dinner',
+      type: 'expense' as const,
+      amount: '30.00',
+      currency: 'USD' as const,
+      txn_date: '2026-04-29',
+      note: '',
+      split_method: 'equal' as const,
+      members: [
+        { user_id: ME, owed_amount: '15.00', share: null, percent: null },
+        {
+          user_id: '01J0000000000000000000BOB',
+          owed_amount: '15.00',
+          share: null,
+          percent: null,
+        },
+      ],
+      payers: [{ user_id: ME, paid_amount: '30.00' }],
+      created_at: '2026-04-29T20:00:00Z',
+      updated_at: '2026-04-29T20:00:00Z',
+      deleted_at: null,
+    };
+    render(
+      withProviders(
+        <>
+          <AddTransactionSheet open onClose={() => {}} existing={existing as never} />
+          <Toaster />
+        </>,
+      ),
+    );
+    await waitFor(() => expect(screen.getByTestId('add-txn-name')).toHaveValue('Dinner'));
+    expect(screen.getByTestId('add-txn-amount')).toHaveValue('30.00');
+    fireEvent.change(screen.getByTestId('add-txn-amount'), { target: { value: '40.00' } });
+    fireEvent.click(screen.getByTestId('add-txn-submit'));
+    await waitFor(() => expect(seen).toHaveLength(1));
+    expect(seen[0]?.ifMatch).toBe('2026-04-29T20:00:00Z');
+    const updateBody = seen[0]?.body as { name: string; amount: string };
+    expect(updateBody.amount).toBe('40.00');
+  });
+
+  it('Phase 5: PRECONDITION_FAILED on edit surfaces the refresh banner', async () => {
+    server.use(
+      http.put(`${BASE}/transactions/:txnId`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'PRECONDITION_FAILED',
+              message: 'stale',
+              request_id: 'r',
+            },
+          },
+          { status: 412 },
+        ),
+      ),
+    );
+    const existing = {
+      txn_id: 'tx1',
+      creator_id: ME,
+      name: 'Dinner',
+      type: 'expense' as const,
+      amount: '30.00',
+      currency: 'USD' as const,
+      txn_date: '2026-04-29',
+      note: '',
+      split_method: 'equal' as const,
+      members: [
+        { user_id: ME, owed_amount: '15.00', share: null, percent: null },
+        {
+          user_id: '01J0000000000000000000BOB',
+          owed_amount: '15.00',
+          share: null,
+          percent: null,
+        },
+      ],
+      payers: [{ user_id: ME, paid_amount: '30.00' }],
+      created_at: '2026-04-29T20:00:00Z',
+      updated_at: '2026-04-29T20:00:00Z',
+      deleted_at: null,
+    };
+    render(
+      withProviders(
+        <>
+          <AddTransactionSheet open onClose={() => {}} existing={existing as never} />
+          <Toaster />
+        </>,
+      ),
+    );
+    await waitFor(() => expect(screen.getByTestId('add-txn-name')).toHaveValue('Dinner'));
+    fireEvent.click(screen.getByTestId('add-txn-submit'));
+    await waitFor(() => expect(screen.getByTestId('add-txn-banner')).toHaveTextContent(/changed/i));
+  });
+
   it('reverting to expense resets split_method to equal so per-member rows do not appear', async () => {
     renderSheet();
     await waitFor(() =>
