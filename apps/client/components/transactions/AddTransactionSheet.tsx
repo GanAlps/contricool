@@ -22,6 +22,10 @@ type Props = {
   prefillFriendId?: string;
 };
 
+type SplitMethod = 'equal' | 'amount' | 'share' | 'percent';
+type TxnType = 'expense' | 'settlement';
+type PayerMode = 'single' | 'multiple';
+
 const FORM_FIELD_ERRORS: Record<string, { field: keyof AddTransactionValues; message: string }> = {
   OWED_SUM: { field: 'members', message: 'Member owed amounts must sum to the total.' },
   PERCENT_SUM: { field: 'members', message: 'Percents must sum to 100.' },
@@ -42,11 +46,15 @@ const BANNER_ERRORS: Record<string, string> = {
 
 const TOAST_ERRORS: Record<string, string> = {
   IDEMPOTENCY_KEY_REUSED: 'This transaction was already created. Refresh to see it.',
-  // Should never reach here in practice — the form always supplies the
-  // header — but defensively map it so a regression in the wiring
-  // surfaces a useful message instead of the generic catch-all.
   IDEMPOTENCY_KEY_REQUIRED: 'Please retry the request.',
 };
+
+const SPLIT_METHODS: { value: SplitMethod; label: string }[] = [
+  { value: 'equal', label: 'Equal' },
+  { value: 'amount', label: 'Amount' },
+  { value: 'share', label: 'Share' },
+  { value: 'percent', label: 'Percent' },
+];
 
 function isApiError(err: unknown): err is ApiErrorException {
   return err instanceof ApiErrorException;
@@ -65,8 +73,6 @@ function newIdempotencyKey(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }
-  // Tests + older runtimes: cryptographic-quality not required for an
-  // idempotency token, just uniqueness within a session.
   return `key-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
@@ -76,16 +82,22 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId }: Props) {
   const create = useCreateTransaction();
   const idempotencyKeyRef = useRef<string>(newIdempotencyKey());
   const [bannerMessage, setBannerMessage] = useState<string | null>(null);
+  const [payerMode, setPayerMode] = useState<PayerMode>('single');
+  const [payerAmounts, setPayerAmounts] = useState<Record<string, string>>({});
 
   const myCurrency = me?.currency ?? 'USD';
   const myUserId = me?.user_id ?? '';
 
-  // Friends in the same currency are pickable; cross-currency friends
-  // are filtered out (the server would reject anyway).
   const pickableFriends = useMemo(
     () => (friends.data?.items ?? []).filter((f) => f.currency === myCurrency),
     [friends.data, myCurrency],
   );
+
+  const friendNameById = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const f of pickableFriends) map[f.user_id] = f.name;
+    return map;
+  }, [pickableFriends]);
 
   const {
     control,
@@ -101,14 +113,6 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId }: Props) {
     mode: 'onSubmit',
   });
 
-  // Reset everything when the sheet (re-)opens. Mint a fresh idempotency
-  // key per open so cancel-then-reopen never collides server-side.
-  //
-  // ``prefillFriendId`` is gated on ``pickableFriends`` so a cross-
-  // currency friend passed in via the prop doesn't bypass the same-
-  // currency picker filter and land silently in the submitted body
-  // (server would 422 on CURRENCY_MISMATCH and the user couldn't
-  // remove the invisible chip).
   useEffect(() => {
     if (open) {
       idempotencyKeyRef.current = newIdempotencyKey();
@@ -117,12 +121,15 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId }: Props) {
         : undefined;
       reset(defaultValues(myUserId, myCurrency, safePrefill));
       setBannerMessage(null);
+      setPayerMode('single');
+      setPayerAmounts({});
     }
   }, [open, reset, myUserId, myCurrency, prefillFriendId, pickableFriends]);
 
   const watchedMembers = watch('members');
   const watchedAmount = watch('amount');
   const watchedType = watch('type');
+  const watchedSplitMethod = watch('split_method');
 
   const memberIds = new Set(watchedMembers.map((m) => m.user_id));
 
@@ -130,17 +137,108 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId }: Props) {
     if (userId === myUserId) {
       return; // creator stays in the list
     }
+    if (watchedType === 'settlement') {
+      // Exactly one other member at a time for settlement.
+      const next = memberIds.has(userId)
+        ? watchedMembers.filter((m) => m.user_id === myUserId)
+        : [
+            ...watchedMembers.filter((m) => m.user_id === myUserId),
+            { user_id: userId, share: null, percent: null, owed_amount: null },
+          ];
+      setValue('members', next, { shouldValidate: false });
+      // Clear any payer-amount entries for the deselected friend.
+      setPayerAmounts((prev) => {
+        const filtered: Record<string, string> = {};
+        for (const m of next) {
+          const v = prev[m.user_id];
+          if (v) filtered[m.user_id] = v;
+        }
+        return filtered;
+      });
+      return;
+    }
     const next = memberIds.has(userId)
       ? watchedMembers.filter((m) => m.user_id !== userId)
-      : [...watchedMembers, { user_id: userId }];
+      : [...watchedMembers, { user_id: userId, share: null, percent: null, owed_amount: null }];
     if (next.length > 10) {
       return;
     }
     setValue('members', next, { shouldValidate: false });
+    setPayerAmounts((prev) => {
+      const filtered: Record<string, string> = {};
+      for (const m of next) {
+        const v = prev[m.user_id];
+        if (v) filtered[m.user_id] = v;
+      }
+      return filtered;
+    });
+  };
+
+  const setMemberField = (
+    userId: string,
+    field: 'share' | 'percent' | 'owed_amount',
+    value: string,
+  ): void => {
+    setValue(
+      'members',
+      watchedMembers.map((m) =>
+        m.user_id === userId ? { ...m, [field]: value === '' ? null : value } : m,
+      ),
+      { shouldValidate: false },
+    );
+  };
+
+  const onTypeChange = (next: TxnType): void => {
+    setValue('type', next, { shouldValidate: false });
+    if (next === 'settlement') {
+      // Settlement: exactly two members + amount split + single payer.
+      const otherMember = watchedMembers.find((m) => m.user_id !== myUserId);
+      const trimmed = otherMember
+        ? [
+            { user_id: myUserId, share: null, percent: null, owed_amount: null },
+            { user_id: otherMember.user_id, share: null, percent: null, owed_amount: null },
+          ]
+        : [{ user_id: myUserId, share: null, percent: null, owed_amount: null }];
+      setValue('members', trimmed, { shouldValidate: false });
+      setValue('split_method', 'amount', { shouldValidate: false });
+      setPayerMode('single');
+      setPayerAmounts({});
+    }
+  };
+
+  const onPayerModeChange = (next: PayerMode): void => {
+    setPayerMode(next);
+    if (next === 'single') {
+      setPayerAmounts({});
+    }
   };
 
   const submit = handleSubmit(async (values) => {
     setBannerMessage(null);
+
+    // Build per-member shape based on split method.
+    const memberRows = values.members.map((m) => ({
+      user_id: m.user_id,
+      share: values.split_method === 'share' && m.share != null ? m.share : null,
+      percent: values.split_method === 'percent' && m.percent != null ? m.percent : null,
+      owed_amount: values.split_method === 'amount' && m.owed_amount != null ? m.owed_amount : null,
+    }));
+
+    // Build payers based on mode.
+    let payers: { user_id: string; paid_amount: string }[];
+    if (payerMode === 'multiple') {
+      const entries = Object.entries(payerAmounts).filter(
+        ([uid, amt]) => memberIds.has(uid) && amt.trim() !== '' && Number(amt) > 0,
+      );
+      if (entries.length === 0) {
+        setError('payers', { type: 'manual', message: 'Enter at least one payer amount.' });
+        return;
+      }
+      payers = entries.map(([uid, amt]) => ({ user_id: uid, paid_amount: amt }));
+    } else {
+      payers = [{ user_id: myUserId, paid_amount: values.amount }];
+    }
+
     try {
       const body: CreateTransactionRequest = {
         name: values.name,
@@ -150,15 +248,8 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId }: Props) {
         txn_date: values.txn_date,
         note: values.note ?? '',
         split_method: values.split_method,
-        members: values.members.map((m) => ({
-          user_id: m.user_id,
-          share: m.share ?? null,
-          percent: m.percent ?? null,
-          owed_amount: m.owed_amount ?? null,
-        })),
-        // Single-payer expense at MVP: requester paid the full amount.
-        // Multi-payer / per-member-amount editing is a Phase 4c follow-up.
-        payers: [{ user_id: myUserId, paid_amount: values.amount }],
+        members: memberRows,
+        payers,
       };
       await create.mutateAsync({ body, idempotencyKey: idempotencyKeyRef.current });
       toast.success('Transaction added');
@@ -206,6 +297,34 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId }: Props) {
             <Text className="text-sm text-danger-700">{bannerMessage}</Text>
           </View>
         ) : null}
+
+        {/* Type segmented control */}
+        <View>
+          <Text className="mb-1 text-sm text-neutral-700">Type</Text>
+          <View className="flex-row rounded-md border border-neutral-300" testID="add-txn-type">
+            {(['expense', 'settlement'] as TxnType[]).map((t, idx) => {
+              const selected = watchedType === t;
+              return (
+                <Pressable
+                  key={t}
+                  testID={`add-txn-type-${t}`}
+                  onPress={() => onTypeChange(t)}
+                  className={`flex-1 items-center py-2 ${idx === 0 ? '' : 'border-l border-neutral-300'} ${
+                    selected ? 'bg-primary-600' : 'bg-white active:bg-neutral-100'
+                  }`}
+                >
+                  <Text
+                    className={
+                      selected ? 'text-sm font-medium text-white' : 'text-sm text-neutral-700'
+                    }
+                  >
+                    {t === 'expense' ? 'Expense' : 'Settlement'}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
 
         <View>
           <Text className="mb-1 text-sm text-neutral-700">Name</Text>
@@ -289,6 +408,7 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId }: Props) {
           ) : null}
         </View>
 
+        {/* Members picker */}
         <View>
           <Text className="mb-1 text-sm text-neutral-700">Members</Text>
           <View className="flex-row flex-wrap gap-2" testID="add-txn-members">
@@ -331,6 +451,139 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId }: Props) {
           ) : null}
         </View>
 
+        {/* Split method segmented — hidden for settlement (always amount). */}
+        {watchedType === 'expense' ? (
+          <View>
+            <Text className="mb-1 text-sm text-neutral-700">Split method</Text>
+            <View className="flex-row rounded-md border border-neutral-300" testID="add-txn-split">
+              {SPLIT_METHODS.map((m, idx) => {
+                const selected = watchedSplitMethod === m.value;
+                return (
+                  <Pressable
+                    key={m.value}
+                    testID={`add-txn-split-${m.value}`}
+                    onPress={() => setValue('split_method', m.value, { shouldValidate: false })}
+                    className={`flex-1 items-center py-2 ${idx === 0 ? '' : 'border-l border-neutral-300'} ${
+                      selected ? 'bg-primary-600' : 'bg-white active:bg-neutral-100'
+                    }`}
+                  >
+                    <Text
+                      className={
+                        selected ? 'text-sm font-medium text-white' : 'text-sm text-neutral-700'
+                      }
+                    >
+                      {m.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
+
+        {/* Per-member input rows for amount/share/percent. */}
+        {(watchedSplitMethod === 'amount' ||
+          watchedSplitMethod === 'share' ||
+          watchedSplitMethod === 'percent') &&
+        watchedType === 'expense' ? (
+          <View testID="add-txn-member-inputs" className="gap-2">
+            <Text className="text-sm text-neutral-700">
+              {watchedSplitMethod === 'amount'
+                ? 'Owed amount per member'
+                : watchedSplitMethod === 'share'
+                  ? 'Shares per member'
+                  : 'Percent per member'}
+            </Text>
+            {watchedMembers.map((m) => {
+              const label = m.user_id === myUserId ? 'You' : (friendNameById[m.user_id] ?? '—');
+              const fieldKey: 'owed_amount' | 'share' | 'percent' =
+                watchedSplitMethod === 'amount'
+                  ? 'owed_amount'
+                  : watchedSplitMethod === 'share'
+                    ? 'share'
+                    : 'percent';
+              const current = (m[fieldKey] ?? '') as string;
+              return (
+                <View key={m.user_id} className="flex-row items-center gap-2">
+                  <Text className="w-24 text-sm text-neutral-700">{label}</Text>
+                  <TextInput
+                    testID={`add-txn-member-${fieldKey}-${m.user_id}`}
+                    value={current}
+                    onChangeText={(v) => setMemberField(m.user_id, fieldKey, v)}
+                    keyboardType="decimal-pad"
+                    inputMode="decimal"
+                    placeholder={watchedSplitMethod === 'percent' ? '0' : '0.00'}
+                    className="h-9 flex-1 rounded-md border border-neutral-300 px-3 text-base text-neutral-900"
+                  />
+                </View>
+              );
+            })}
+          </View>
+        ) : null}
+
+        {/* Paid by control — hidden for settlement (always single payer). */}
+        {watchedType === 'expense' ? (
+          <View>
+            <Text className="mb-1 text-sm text-neutral-700">Paid by</Text>
+            <View
+              className="flex-row rounded-md border border-neutral-300"
+              testID="add-txn-payer-mode"
+            >
+              {(['single', 'multiple'] as PayerMode[]).map((mode, idx) => {
+                const selected = payerMode === mode;
+                return (
+                  <Pressable
+                    key={mode}
+                    testID={`add-txn-payer-mode-${mode}`}
+                    onPress={() => onPayerModeChange(mode)}
+                    className={`flex-1 items-center py-2 ${idx === 0 ? '' : 'border-l border-neutral-300'} ${
+                      selected ? 'bg-primary-600' : 'bg-white active:bg-neutral-100'
+                    }`}
+                  >
+                    <Text
+                      className={
+                        selected ? 'text-sm font-medium text-white' : 'text-sm text-neutral-700'
+                      }
+                    >
+                      {mode === 'single' ? 'You only' : 'Multiple'}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
+
+        {/* Per-payer amount inputs when Multiple. */}
+        {payerMode === 'multiple' && watchedType === 'expense' ? (
+          <View testID="add-txn-payer-inputs" className="gap-2">
+            <Text className="text-sm text-neutral-700">Paid amount per payer</Text>
+            {watchedMembers.map((m) => {
+              const label = m.user_id === myUserId ? 'You' : (friendNameById[m.user_id] ?? '—');
+              const current = payerAmounts[m.user_id] ?? '';
+              return (
+                <View key={m.user_id} className="flex-row items-center gap-2">
+                  <Text className="w-24 text-sm text-neutral-700">{label}</Text>
+                  <TextInput
+                    testID={`add-txn-payer-amount-${m.user_id}`}
+                    value={current}
+                    onChangeText={(v) => setPayerAmounts((prev) => ({ ...prev, [m.user_id]: v }))}
+                    keyboardType="decimal-pad"
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    className="h-9 flex-1 rounded-md border border-neutral-300 px-3 text-base text-neutral-900"
+                  />
+                </View>
+              );
+            })}
+            {errors.payers ? (
+              <Text testID="add-txn-payers-error" className="mt-1 text-sm text-danger-600">
+                {(errors.payers as { message?: string }).message ?? 'Invalid payers'}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+
         <View>
           <Text className="mb-1 text-sm text-neutral-700">Note (optional)</Text>
           <Controller
@@ -349,17 +602,27 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId }: Props) {
           />
         </View>
 
-        <View>
-          <Text className="text-xs text-neutral-500">
-            Type: {watchedType === 'settlement' ? 'Settlement' : 'Expense'} · Split: equal · You
-            paid {watchedAmount} {myCurrency}
-          </Text>
-          {errors.payers ? (
-            <Text testID="add-txn-payers-error" className="mt-1 text-sm text-danger-600">
-              {(errors.payers as { message?: string }).message ?? 'Invalid payers'}
+        {/* Settlement summary */}
+        {watchedType === 'settlement' ? (
+          <View>
+            <Text className="text-xs text-neutral-500">
+              Settlement: amount split, you paid {watchedAmount || '0'} {myCurrency}
             </Text>
-          ) : null}
-        </View>
+          </View>
+        ) : null}
+
+        {payerMode === 'single' && watchedType === 'expense' ? (
+          <View>
+            <Text className="text-xs text-neutral-500">
+              You paid {watchedAmount || '0'} {myCurrency}
+            </Text>
+            {errors.payers ? (
+              <Text testID="add-txn-payers-error" className="mt-1 text-sm text-danger-600">
+                {(errors.payers as { message?: string }).message ?? 'Invalid payers'}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
 
         <View className="flex-row justify-end gap-2 pt-2">
           <Button testID="add-txn-cancel" variant="secondary" onPress={onClose}>

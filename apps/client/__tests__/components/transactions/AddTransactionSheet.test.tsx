@@ -199,3 +199,242 @@ describe('AddTransactionSheet — server-error mapping', () => {
     await waitFor(() => expect(screen.getByTestId('add-txn-payers-error')).toBeInTheDocument());
   });
 });
+
+describe('AddTransactionSheet — split-method control', () => {
+  function captureBody() {
+    const seen: { body: unknown }[] = [];
+    server.use(
+      http.post(`${BASE}/transactions`, async ({ request }) => {
+        seen.push({ body: await request.json() });
+        return HttpResponse.json(
+          {
+            txn_id: 'x',
+            creator_id: ME,
+            name: 'x',
+            type: 'expense',
+            amount: '30.00',
+            currency: 'USD',
+            txn_date: '2026-04-29',
+            note: '',
+            split_method: 'amount',
+            members: [],
+            payers: [],
+            created_at: '2026-04-29T20:00:00Z',
+            updated_at: '2026-04-29T20:00:00Z',
+            deleted_at: null,
+          },
+          { status: 201 },
+        );
+      }),
+    );
+    return seen;
+  }
+
+  it('switches to amount split and submits per-member owed_amounts', async () => {
+    const seen = captureBody();
+    renderSheet();
+    await waitFor(() =>
+      expect(screen.getByTestId('add-txn-member-01J0000000000000000000BOB')).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByTestId('add-txn-name'), { target: { value: 'Groceries' } });
+    fireEvent.change(screen.getByTestId('add-txn-amount'), { target: { value: '45.50' } });
+    fireEvent.click(screen.getByTestId('add-txn-member-01J0000000000000000000BOB'));
+    fireEvent.click(screen.getByTestId('add-txn-split-amount'));
+    fireEvent.change(screen.getByTestId(`add-txn-member-owed_amount-${ME}`), {
+      target: { value: '20.00' },
+    });
+    fireEvent.change(screen.getByTestId('add-txn-member-owed_amount-01J0000000000000000000BOB'), {
+      target: { value: '25.50' },
+    });
+    fireEvent.click(screen.getByTestId('add-txn-submit'));
+    await waitFor(() => expect(seen).toHaveLength(1));
+    const body = seen[0]?.body as {
+      split_method: string;
+      members: { user_id: string; owed_amount: string | null; share: null; percent: null }[];
+    };
+    expect(body.split_method).toBe('amount');
+    expect(body.members.find((m) => m.user_id === ME)?.owed_amount).toBe('20.00');
+    expect(body.members.find((m) => m.user_id === '01J0000000000000000000BOB')?.owed_amount).toBe(
+      '25.50',
+    );
+  });
+
+  it('share split sends per-member shares and clears amount/percent fields', async () => {
+    const seen = captureBody();
+    renderSheet();
+    await waitFor(() =>
+      expect(screen.getByTestId('add-txn-member-01J0000000000000000000BOB')).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByTestId('add-txn-name'), { target: { value: 'Cab' } });
+    fireEvent.change(screen.getByTestId('add-txn-amount'), { target: { value: '10.00' } });
+    fireEvent.click(screen.getByTestId('add-txn-member-01J0000000000000000000BOB'));
+    fireEvent.click(screen.getByTestId('add-txn-split-share'));
+    fireEvent.change(screen.getByTestId(`add-txn-member-share-${ME}`), {
+      target: { value: '1' },
+    });
+    fireEvent.change(screen.getByTestId('add-txn-member-share-01J0000000000000000000BOB'), {
+      target: { value: '2' },
+    });
+    fireEvent.click(screen.getByTestId('add-txn-submit'));
+    await waitFor(() => expect(seen).toHaveLength(1));
+    const body = seen[0]?.body as {
+      split_method: string;
+      members: { user_id: string; share: string | null; owed_amount: null; percent: null }[];
+    };
+    expect(body.split_method).toBe('share');
+    expect(body.members.find((m) => m.user_id === ME)?.share).toBe('1');
+    expect(body.members.find((m) => m.user_id === ME)?.owed_amount).toBeNull();
+    expect(body.members.find((m) => m.user_id === ME)?.percent).toBeNull();
+  });
+
+  it('percent split sends per-member percent', async () => {
+    const seen = captureBody();
+    renderSheet();
+    await waitFor(() =>
+      expect(screen.getByTestId('add-txn-member-01J0000000000000000000BOB')).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByTestId('add-txn-name'), { target: { value: 'Concert' } });
+    fireEvent.change(screen.getByTestId('add-txn-amount'), { target: { value: '120.00' } });
+    fireEvent.click(screen.getByTestId('add-txn-member-01J0000000000000000000BOB'));
+    fireEvent.click(screen.getByTestId('add-txn-split-percent'));
+    fireEvent.change(screen.getByTestId(`add-txn-member-percent-${ME}`), {
+      target: { value: '40' },
+    });
+    fireEvent.change(screen.getByTestId('add-txn-member-percent-01J0000000000000000000BOB'), {
+      target: { value: '60' },
+    });
+    fireEvent.click(screen.getByTestId('add-txn-submit'));
+    await waitFor(() => expect(seen).toHaveLength(1));
+    const body = seen[0]?.body as {
+      split_method: string;
+      members: { user_id: string; percent: string | null }[];
+    };
+    expect(body.split_method).toBe('percent');
+    expect(body.members.find((m) => m.user_id === ME)?.percent).toBe('40');
+  });
+
+  it('hides split-method picker on settlement and forces amount split', async () => {
+    renderSheet();
+    await waitFor(() =>
+      expect(screen.getByTestId('add-txn-member-01J0000000000000000000BOB')).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByTestId('add-txn-type-settlement'));
+    expect(screen.queryByTestId('add-txn-split')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('add-txn-payer-mode')).not.toBeInTheDocument();
+  });
+});
+
+describe('AddTransactionSheet — multi-payer control', () => {
+  it('submits per-payer amounts when in multiple mode', async () => {
+    const seen: { body: unknown }[] = [];
+    server.use(
+      http.post(`${BASE}/transactions`, async ({ request }) => {
+        seen.push({ body: await request.json() });
+        return HttpResponse.json(
+          {
+            txn_id: 'x',
+            creator_id: ME,
+            name: 'x',
+            type: 'expense',
+            amount: '200.00',
+            currency: 'USD',
+            txn_date: '2026-04-29',
+            note: '',
+            split_method: 'equal',
+            members: [],
+            payers: [],
+            created_at: '2026-04-29T20:00:00Z',
+            updated_at: '2026-04-29T20:00:00Z',
+            deleted_at: null,
+          },
+          { status: 201 },
+        );
+      }),
+    );
+    renderSheet();
+    await waitFor(() =>
+      expect(screen.getByTestId('add-txn-member-01J0000000000000000000BOB')).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByTestId('add-txn-name'), { target: { value: 'Hotel' } });
+    fireEvent.change(screen.getByTestId('add-txn-amount'), { target: { value: '200.00' } });
+    fireEvent.click(screen.getByTestId('add-txn-member-01J0000000000000000000BOB'));
+    fireEvent.click(screen.getByTestId('add-txn-payer-mode-multiple'));
+    fireEvent.change(screen.getByTestId(`add-txn-payer-amount-${ME}`), {
+      target: { value: '120.00' },
+    });
+    fireEvent.change(screen.getByTestId('add-txn-payer-amount-01J0000000000000000000BOB'), {
+      target: { value: '80.00' },
+    });
+    fireEvent.click(screen.getByTestId('add-txn-submit'));
+    await waitFor(() => expect(seen).toHaveLength(1));
+    const body = seen[0]?.body as {
+      payers: { user_id: string; paid_amount: string }[];
+    };
+    expect(body.payers).toHaveLength(2);
+    expect(body.payers.find((p) => p.user_id === ME)?.paid_amount).toBe('120.00');
+    expect(body.payers.find((p) => p.user_id === '01J0000000000000000000BOB')?.paid_amount).toBe(
+      '80.00',
+    );
+  });
+
+  it('shows a payers field error if multiple is selected with no amounts entered', async () => {
+    renderSheet();
+    await waitFor(() =>
+      expect(screen.getByTestId('add-txn-member-01J0000000000000000000BOB')).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByTestId('add-txn-name'), { target: { value: 'Hotel' } });
+    fireEvent.change(screen.getByTestId('add-txn-amount'), { target: { value: '50.00' } });
+    fireEvent.click(screen.getByTestId('add-txn-member-01J0000000000000000000BOB'));
+    fireEvent.click(screen.getByTestId('add-txn-payer-mode-multiple'));
+    fireEvent.click(screen.getByTestId('add-txn-submit'));
+    await waitFor(() => expect(screen.getByTestId('add-txn-payers-error')).toBeInTheDocument());
+  });
+});
+
+describe('AddTransactionSheet — type control', () => {
+  it('switching to settlement collapses members to two and forces amount split', async () => {
+    const seen: { body: unknown }[] = [];
+    server.use(
+      http.post(`${BASE}/transactions`, async ({ request }) => {
+        seen.push({ body: await request.json() });
+        return HttpResponse.json(
+          {
+            txn_id: 'x',
+            creator_id: ME,
+            name: 'x',
+            type: 'settlement',
+            amount: '10.00',
+            currency: 'USD',
+            txn_date: '2026-04-29',
+            note: '',
+            split_method: 'amount',
+            members: [],
+            payers: [],
+            created_at: '2026-04-29T20:00:00Z',
+            updated_at: '2026-04-29T20:00:00Z',
+            deleted_at: null,
+          },
+          { status: 201 },
+        );
+      }),
+    );
+    renderSheet();
+    await waitFor(() =>
+      expect(screen.getByTestId('add-txn-member-01J0000000000000000000BOB')).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByTestId('add-txn-name'), { target: { value: 'Settle' } });
+    fireEvent.change(screen.getByTestId('add-txn-amount'), { target: { value: '10.00' } });
+    fireEvent.click(screen.getByTestId('add-txn-member-01J0000000000000000000BOB'));
+    fireEvent.click(screen.getByTestId('add-txn-type-settlement'));
+    fireEvent.click(screen.getByTestId('add-txn-submit'));
+    await waitFor(() => expect(seen).toHaveLength(1));
+    const body = seen[0]?.body as {
+      type: string;
+      split_method: string;
+      members: { user_id: string }[];
+    };
+    expect(body.type).toBe('settlement');
+    expect(body.split_method).toBe('amount');
+    expect(body.members).toHaveLength(2);
+  });
+});
