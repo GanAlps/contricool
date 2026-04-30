@@ -10,6 +10,7 @@
 import { type ContricoolClient, createClient } from '@contricool/client-sdk';
 
 import { useAuthStore } from './auth-store';
+import { getRefreshToken } from './secure-storage';
 
 /** Singleton SDK client used by the auth driver and (later) feature modules. */
 export const apiClient: ContricoolClient = createClient({
@@ -27,6 +28,10 @@ export const apiClient: ContricoolClient = createClient({
   onTokenRefreshed: ({ access_token, id_token }) => {
     useAuthStore.getState()._setTokensFromRefresh(access_token, id_token);
   },
+  // Native: returns the refresh token from expo-secure-store so the
+  // SDK middleware can attach it in the 401-retry refresh body.
+  // Web: returns null (HttpOnly cookie carries the value instead).
+  getRefreshToken,
 });
 
 // Re-export for screens / drivers that previously imported the

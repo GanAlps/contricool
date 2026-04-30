@@ -16,6 +16,8 @@
  *     so a tight loop of the same error doesn't spam the sink.
  */
 
+import { redact } from './pii-denylist';
+
 type TelemetryLevel = 'error' | 'metric';
 
 type TelemetryPayload = {
@@ -56,11 +58,11 @@ export async function postTelemetry(payload: TelemetryPayload): Promise<void> {
   if (!shouldEmit(payload.level, payload.name)) {
     return;
   }
-  const body: TelemetryPayload = {
+  const body: TelemetryPayload = redact({
     ...payload,
     url: payload.url ?? (typeof window !== 'undefined' ? window.location.href : ''),
     user_agent: payload.user_agent ?? (typeof navigator !== 'undefined' ? navigator.userAgent : ''),
-  };
+  });
   try {
     const url = `${getBaseUrl()}/telemetry/error`;
     // ``keepalive: true`` lets the request continue after a page
