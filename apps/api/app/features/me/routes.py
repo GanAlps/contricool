@@ -6,7 +6,11 @@ from fastapi import APIRouter, Depends, Response, status
 from app.core.dependencies import current_principal
 from app.core.principal import Principal
 from app.features.me import service
-from app.features.me.models import ExportResponse
+from app.features.me.models import (
+    ExportResponse,
+    MeProfileSlim,
+    UpdateProfileRequest,
+)
 
 router = APIRouter(prefix="/me", tags=["me"])
 
@@ -30,6 +34,27 @@ def delete_my_account_route(
         requester_email=principal.email,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.patch(
+    "/profile",
+    status_code=status.HTTP_200_OK,
+    response_model=MeProfileSlim,
+)
+def update_my_profile_route(
+    body: UpdateProfileRequest,
+    principal: Principal = Depends(current_principal),  # noqa: B008
+) -> MeProfileSlim:
+    """Update the requester's display name.
+
+    Email and currency are not editable from this endpoint and any
+    extra body field is rejected (Pydantic ``extra="forbid"``).
+    """
+    return service.update_my_profile(
+        requester_id=principal.user_id,
+        requester_email=principal.email,
+        body=body,
+    )
 
 
 @router.get(

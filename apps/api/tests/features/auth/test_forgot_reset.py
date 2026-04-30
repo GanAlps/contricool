@@ -224,6 +224,84 @@ def test_reset_password_unknown_email_masked_as_invalid_code(
         cognito_client._set_client_for_tests(_WrappedCognito(auth_env["cognito"]))  # type: ignore[arg-type]
 
 
+def test_reset_password_same_as_current_returns_password_reused_422(
+    auth_client: TestClient, auth_env: dict[str, object]
+) -> None:
+    """Cognito raises ``InvalidParameterException`` with a "previous
+    password" hint when the user reuses their current password during
+    the reset flow. Surface that as 422 ``PASSWORD_REUSED`` instead of
+    the wrong default 409 ``ALREADY_CONFIRMED`` mapping."""
+    fake = MagicMock()
+    from botocore.exceptions import ClientError
+
+    fake.confirm_forgot_password.side_effect = ClientError(
+        error_response={
+            "Error": {
+                "Code": "InvalidParameterException",
+                "Message": "Password should differ from previous password.",
+            },
+            "ResponseMetadata": {},
+        },
+        operation_name="ConfirmForgotPassword",
+    )
+    cognito_client._set_client_for_tests(fake)
+    try:
+        r = auth_client.post(
+            "/v1/auth/reset-password",
+            json={
+                "email": "alice@example.com",
+                "code": "123456",
+                "new_password": "S0meOldPwd!",
+            },
+        )
+        assert r.status_code == 422
+        body = r.json()["error"]
+        assert body["code"] == "PASSWORD_REUSED"
+        assert "different" in body["message"].lower()
+    finally:
+        from tests.features.auth.conftest import _WrappedCognito
+
+        cognito_client._set_client_for_tests(_WrappedCognito(auth_env["cognito"]))  # type: ignore[arg-type]
+
+
+def test_reset_password_other_invalid_parameter_falls_back_to_invalid_password(
+    auth_client: TestClient, auth_env: dict[str, object]
+) -> None:
+    """Other ``InvalidParameterException`` cases on the reset path
+    (e.g. malformed password) map to 422 ``INVALID_PASSWORD`` — never
+    the 409 ``ALREADY_CONFIRMED`` that the default _FIXED_MAP would
+    yield for the resend path."""
+    fake = MagicMock()
+    from botocore.exceptions import ClientError
+
+    fake.confirm_forgot_password.side_effect = ClientError(
+        error_response={
+            "Error": {
+                "Code": "InvalidParameterException",
+                "Message": "Some other parameter problem.",
+            },
+            "ResponseMetadata": {},
+        },
+        operation_name="ConfirmForgotPassword",
+    )
+    cognito_client._set_client_for_tests(fake)
+    try:
+        r = auth_client.post(
+            "/v1/auth/reset-password",
+            json={
+                "email": "alice@example.com",
+                "code": "123456",
+                "new_password": "N3wPassw0rd!",
+            },
+        )
+        assert r.status_code == 422
+        assert r.json()["error"]["code"] == "INVALID_PASSWORD"
+    finally:
+        from tests.features.auth.conftest import _WrappedCognito
+
+        cognito_client._set_client_for_tests(_WrappedCognito(auth_env["cognito"]))  # type: ignore[arg-type]
+
+
 def test_reset_password_extra_field_rejected(auth_client: TestClient) -> None:
     r = auth_client.post(
         "/v1/auth/reset-password",

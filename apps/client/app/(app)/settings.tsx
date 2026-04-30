@@ -1,6 +1,6 @@
 import { Link, useRouter } from 'expo-router';
-import { useState } from 'react';
-import { Platform, ScrollView, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Platform, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { Button } from '~/components/ui/Button';
 import { Card } from '~/components/ui/Card';
@@ -8,18 +8,50 @@ import { Sheet } from '~/components/ui/Sheet';
 import { toast } from '~/components/ui/Toaster';
 import { ApiErrorException } from '~/lib/api';
 import { useAuthStore } from '~/lib/auth-store';
-import { useDeleteMyAccount, useExportMyData } from '~/lib/queries/me';
+import { useDeleteMyAccount, useExportMyData, useUpdateMyProfile } from '~/lib/queries/me';
 
 const EXPORT_FILENAME = 'contricool-export.json';
 
 export default function SettingsScreen() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
+  const patchUser = useAuthStore((s) => s.patchUser);
   const signOut = useAuthStore((s) => s.signOut);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [draftName, setDraftName] = useState(user?.name ?? '');
   const exportMutation = useExportMyData();
   const deleteMutation = useDeleteMyAccount();
+  const updateProfile = useUpdateMyProfile();
+
+  useEffect(() => {
+    setDraftName(user?.name ?? '');
+  }, [user?.name]);
+
+  const onSaveName = async (): Promise<void> => {
+    const trimmed = draftName.trim();
+    if (!trimmed) {
+      toast.error('Name cannot be empty.');
+      return;
+    }
+    if (trimmed === user?.name) {
+      setEditingName(false);
+      return;
+    }
+    try {
+      const updated = await updateProfile.mutateAsync({ name: trimmed });
+      patchUser({ name: updated.name });
+      setEditingName(false);
+      toast.success('Name updated.');
+    } catch (e) {
+      if (e instanceof ApiErrorException) {
+        toast.error(e.error.message ?? 'Could not update name.');
+      } else {
+        toast.error('Could not update name.');
+      }
+    }
+  };
 
   const onExport = async (): Promise<void> => {
     try {
@@ -75,8 +107,50 @@ export default function SettingsScreen() {
 
         <Card>
           <Text className="mb-1 text-base font-semibold text-neutral-900">Profile</Text>
-          <Text className="text-sm text-neutral-700">{user?.name ?? '—'}</Text>
-          <Text className="text-xs text-neutral-500">
+          {editingName ? (
+            <View className="gap-2">
+              <TextInput
+                testID="settings-name-input"
+                value={draftName}
+                onChangeText={setDraftName}
+                placeholder="Display name"
+                className="rounded-md border border-neutral-300 bg-white p-2 text-sm text-neutral-900"
+              />
+              <View className="flex-row justify-end gap-2">
+                <Button
+                  testID="settings-name-cancel"
+                  variant="ghost"
+                  onPress={() => {
+                    setDraftName(user?.name ?? '');
+                    setEditingName(false);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  testID="settings-name-save"
+                  onPress={onSaveName}
+                  loading={updateProfile.isPending}
+                >
+                  Save
+                </Button>
+              </View>
+            </View>
+          ) : (
+            <View className="flex-row items-center justify-between">
+              <Text testID="settings-name" className="text-sm text-neutral-700">
+                {user?.name ?? '—'}
+              </Text>
+              <Button
+                testID="settings-name-edit"
+                variant="secondary"
+                onPress={() => setEditingName(true)}
+              >
+                Edit
+              </Button>
+            </View>
+          )}
+          <Text className="mt-1 text-xs text-neutral-500">
             Default currency: {user?.currency ?? '—'}
           </Text>
         </Card>

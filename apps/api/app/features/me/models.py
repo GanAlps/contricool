@@ -33,6 +33,38 @@ class MeProfile(BaseModel):
     created_at: datetime
 
 
+# ---- Profile self-update -------------------------------------------
+
+# Same name bounds as ``SignupRequest.name`` — keep the two in sync so
+# every name in the system matches the same shape.
+_NAME_MIN = 1
+_NAME_MAX = 128
+
+
+class UpdateProfileRequest(BaseModel):
+    """``PATCH /v1/me/profile`` request body.
+
+    Only the display ``name`` is mutable. Email and ``currency`` are
+    intentionally absent and any extra field is rejected so that
+    accidental client churn cannot rewrite them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: Annotated[
+        str,
+        Field(min_length=_NAME_MIN, max_length=_NAME_MAX),
+    ]
+
+
+class MeProfileSlim(BaseModel):
+    """``PATCH /v1/me/profile`` 200 response."""
+
+    user_id: str
+    name: str
+    currency: Currency
+
+
 class FriendshipExport(BaseModel):
     """One friendship in the export."""
 

@@ -134,6 +134,128 @@ def new_audit_id() -> str:
     return str(ULID())
 
 
+def new_comment_id() -> str:
+    return str(ULID())
+
+
+# ---- Comments --------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class CommentRow:
+    """One COMMENT row, decoded from DDB."""
+
+    comment_id: str
+    txn_id: str
+    author_id: str
+    body: str
+    kind: str
+    created_at: str
+
+
+def put_comment(
+    *,
+    txn_id: str,
+    comment_id: str,
+    author_id: str,
+    body: str,
+    kind: str,
+    created_at: str | None = None,
+) -> CommentRow:
+    """Append a COMMENT row.
+
+    Idempotent on (``txn_id``, ``comment_id``) — a duplicate write
+    raises :class:`ConflictError` so callers can decide whether to
+    swallow it (system path) or surface it (user path; not currently
+    used because the ULID is server-minted).
+    """
+    iso = created_at or _iso(_now_utc())
+    item: dict[str, Any] = {
+        "PK": f"TXN#{txn_id}",
+        "SK": f"COMMENT#{comment_id}",
+        "author_id": author_id,
+        "body": body,
+        "kind": kind,
+        "created_at": iso,
+    }
+    try:
+        _transactions_table().put_item(
+            Item=item,
+            ConditionExpression="attribute_not_exists(PK)",
+        )
+    except ClientError as exc:  # pragma: no cover - server-minted ULIDs do not collide; defensive
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code == "ConditionalCheckFailedException":
+            raise ConflictError("comment already exists") from exc
+        raise
+    return CommentRow(
+        comment_id=comment_id,
+        txn_id=txn_id,
+        author_id=author_id,
+        body=body,
+        kind=kind,
+        created_at=iso,
+    )
+
+
+def query_comments(
+    txn_id: str, *, limit: int, last_sk: str | None = None
+) -> tuple[list[CommentRow], str | None]:
+    """Return up to ``limit`` COMMENT rows for ``txn_id``, oldest-first.
+
+    The second tuple element is the next cursor (the SK of the last
+    returned row) when more rows remain, else ``None``.
+    """
+    expr_values: dict[str, Any] = {
+        ":pk": f"TXN#{txn_id}",
+        ":sk_prefix": "COMMENT#",
+    }
+    if last_sk:
+        expr_values[":sk_after"] = last_sk
+        key_expr = (
+            "PK = :pk AND SK BETWEEN :sk_after AND :sk_upper"
+        )
+        expr_values[":sk_upper"] = "COMMENT#~"  # ASCII just past Crockford
+    else:
+        key_expr = "PK = :pk AND begins_with(SK, :sk_prefix)"
+
+    # DDB ``BETWEEN`` is inclusive on both ends, so when ``last_sk`` is
+    # set the query returns the cursor row itself and the post-query
+    # filter below drops it. Fetch one extra row to compensate so the
+    # ``has_more`` accounting still holds.
+    fetch_limit = (limit + 2) if last_sk else (limit + 1)
+    response = _transactions_table().query(
+        KeyConditionExpression=key_expr,
+        ExpressionAttributeValues=expr_values,
+        Limit=fetch_limit,
+        ScanIndexForward=True,
+    )
+    items = list(response.get("Items") or [])
+    # Drop the lower-bound row if it matched the strict "after" cursor.
+    if last_sk:
+        items = [it for it in items if str(it["SK"]) != last_sk]
+    has_more = len(items) > limit
+    rows: list[CommentRow] = []
+    for it in items[:limit]:
+        sk = str(it["SK"])
+        rows.append(
+            CommentRow(
+                comment_id=sk.removeprefix("COMMENT#"),
+                txn_id=txn_id,
+                author_id=str(it["author_id"]),
+                body=str(it["body"]),
+                kind=str(it.get("kind", "user")),
+                created_at=str(it["created_at"]),
+            )
+        )
+    next_cursor = str(items[limit - 1]["SK"]) if has_more and rows else None
+    return rows, next_cursor
+
+
+class ConflictError(Exception):
+    """Raised by :func:`put_comment` on a primary-key clash."""
+
+
 # ---- Read paths ------------------------------------------------------
 
 

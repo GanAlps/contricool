@@ -1,11 +1,11 @@
 # `me` feature
 
-Endpoints that act on the requesting user's own account. Phase 7
-ships two routes:
+Endpoints that act on the requesting user's own account.
 
 | Method | Path | Purpose |
 |---|---|---|
 | `DELETE` | `/v1/me` | Soft-deactivate the requester. Sets `status=deactivated` + `deactivated_at` on the Users META row, then `AdminDisableUser` + `AdminUserGlobalSignOut` in Cognito. Idempotent — a second call on an already-deactivated user is a no-op (still 204). |
+| `PATCH` | `/v1/me/profile` | Update the requester's display name. Body: `{name: str}`. Email and currency are intentionally not editable from this surface; any extra body field is rejected with 422 `VALIDATION_ERROR`. |
 | `GET` | `/v1/me/export` | Returns a JSON dump of the requester's profile, friendships, and every transaction they are a member of. Rate-limited to 1 export per 24 hours via a DDB sliding-window counter (returns 429 with `retry_after_seconds` on violation). |
 
 ## Account-deletion lifecycle

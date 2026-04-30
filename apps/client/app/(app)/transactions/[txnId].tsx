@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 
 import { AddTransactionSheet } from '~/components/transactions/AddTransactionSheet';
+import { CommentList } from '~/components/transactions/CommentList';
 import { Button } from '~/components/ui/Button';
 import { Card } from '~/components/ui/Card';
 import { Sheet } from '~/components/ui/Sheet';
@@ -142,6 +143,14 @@ export default function TransactionDetailScreen() {
           </Button>
         </View>
       </Card>
+
+      <View className="mt-4">
+        <CommentList
+          txnId={t.txn_id}
+          memberIds={t.members.map((m) => m.user_id)}
+          nameByUserId={nameByUserId}
+        />
+      </View>
 
       <AddTransactionSheet open={editOpen} onClose={() => setEditOpen(false)} existing={t} />
 

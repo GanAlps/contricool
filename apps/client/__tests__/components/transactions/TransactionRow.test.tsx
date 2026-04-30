@@ -14,6 +14,7 @@ const baseItem: TransactionListItem = {
   split_method: 'equal',
   creator_id: '01J0000000000000000000ALI',
   my_owed_amount: '10.00',
+  my_paid_amount: '0.00',
   created_at: '2026-04-29T20:00:00Z',
 };
 

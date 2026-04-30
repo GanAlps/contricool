@@ -37,11 +37,7 @@ export default function DashboardScreen() {
         </Button>
       </View>
 
-      <SummaryCards
-        myUserId={user?.user_id ?? ''}
-        items={items}
-        currency={user?.currency ?? 'USD'}
-      />
+      <SummaryCards items={items} currency={user?.currency ?? 'USD'} />
 
       <Text className="mb-2 text-base font-semibold text-neutral-900">Recent activity</Text>
       {txns.isLoading ? (

@@ -24,7 +24,9 @@ from app.features.me.models import (
     ExportResponse,
     FriendshipExport,
     MeProfile,
+    MeProfileSlim,
     TransactionExport,
+    UpdateProfileRequest,
 )
 from app.features.transactions import repository as txn_repo
 from app.features.transactions.models import Member, Payer
@@ -40,6 +42,79 @@ class ExportRateLimitedError(AuthError):
             message="Export is rate-limited; try again later.",
             retry_after_seconds=retry_after,
         )
+
+
+# ---- Update profile ---------------------------------------------------
+
+
+def update_my_profile(
+    *,
+    requester_id: str,
+    requester_email: str,
+    body: UpdateProfileRequest,
+) -> MeProfileSlim:
+    """Update the requester's display name on their META row.
+
+    Email and currency are not editable through this surface. A blank
+    name (after trim) raises 422 ``VALIDATION_ERROR``. A missing /
+    deactivated META row raises 403 ``NOT_ALLOWED``.
+
+    Mirrors the new name back to the Cognito ``name`` user attribute
+    so the next ID-token refresh carries the updated value (the SDK
+    middleware decodes ``name`` from the JWT to populate the client
+    auth store, so without this the in-session name silently reverts
+    on the next refresh). The mirror is best-effort and runs *after*
+    the DDB write — a Cognito error logs but does not roll back the
+    successful META update.
+    """
+    try:
+        new_name = me_repo.update_user_name(user_id=requester_id, name=body.name)
+    except me_repo.ProfileNameBlankError as exc:
+        raise AuthError(
+            code="VALIDATION_ERROR",
+            http_status=422,
+            message="name must not be blank.",
+            details=[{"field": "name", "issue": "must not be blank"}],
+        ) from exc
+    except me_repo.ProfileNotEditableError as exc:
+        raise AuthError(
+            code="NOT_ALLOWED",
+            http_status=403,
+            message="Profile cannot be edited for this account.",
+        ) from exc
+
+    profile_meta = friends_repo.get_user_meta(requester_id)
+    # pragma: no cover - defensive: META vanished after a successful update
+    if profile_meta is None:  # pragma: no cover
+        raise AuthError(
+            code="NOT_FOUND",
+            http_status=404,
+            message="No such user.",
+        )
+
+    try:
+        cognito_client.CognitoClient(
+            user_pool_id=config.load().cognito_user_pool_id
+        ).admin_update_user_attributes(
+            email=requester_email, attributes={"name": new_name}
+        )
+    except Exception as exc:
+        logger.warning(
+            "me_profile_cognito_mirror_failed",
+            extra={
+                "user_id": requester_id,
+                "error_type": type(exc).__name__,
+            },
+        )
+
+    logger.info(
+        "me_profile_updated", extra={"user_id": requester_id}
+    )
+    return MeProfileSlim(
+        user_id=requester_id,
+        name=new_name,
+        currency=profile_meta.currency,  # type: ignore[arg-type]
+    )
 
 
 # ---- Delete -----------------------------------------------------------
