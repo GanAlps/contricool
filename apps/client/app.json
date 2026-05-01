@@ -33,6 +33,15 @@
     "plugins": ["expo-router", "expo-secure-store", "@sentry/react-native"],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "ce8cf8e6-9963-49b2-bf15-b5c6525250c7"
+      }
+    },
+    "owner": "oshogupta"
   }
 }
