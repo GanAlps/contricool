@@ -58,7 +58,15 @@ export function QaTools() {
             // Fire a deliberately-broken fetch so we exercise the
             // network-error capture path. We don't care about the
             // response — only that the failure surfaces in Sentry.
-            void fetch('http://localhost:0/qa-tools-deliberate-fetch-fail').catch((e: unknown) => {
+            //
+            // RFC 6761 guarantees the `.invalid` TLD is always
+            // NXDOMAIN at every layer (DNS, OkHttp, NSURLSession),
+            // so this fetch reliably rejects on Android and iOS.
+            // Earlier versions used port 0, but port-0 behavior
+            // is implementation-defined — some stacks return an
+            // empty response instead of rejecting, leaving the
+            // catch block unreachable.
+            void fetch('https://qa-tools-deliberate-fail.invalid/').catch((e: unknown) => {
               reportError('qa-tools-deliberate-fetch-error', e);
             });
           }}

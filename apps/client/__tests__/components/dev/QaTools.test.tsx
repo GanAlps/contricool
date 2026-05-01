@@ -11,7 +11,7 @@
  * on the Sentry round-trip because the underlying telemetry tests
  * already cover that path; we just lock the surface contract.
  */
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const reportErrorSpy = vi.hoisted(() => vi.fn());
@@ -54,6 +54,13 @@ afterEach(() => {
 describe('QaTools', () => {
   it('renders nothing on web (the web bundle should not surface debug crash buttons)', async () => {
     platformMock.OS = 'web';
+    // Reset modules so the env-var snapshot from a previous test
+    // (e.g. one that set EXPO_PUBLIC_ENV=production) cannot make this
+    // test pass for the wrong reason — without the reset, the
+    // module-evaluation cache could yield `null` due to the env-var
+    // guard rather than the Platform.OS === 'web' guard we're
+    // actually verifying here.
+    vi.resetModules();
     const { QaTools } = await import('~/components/dev/QaTools');
     render(<QaTools />);
     expect(screen.queryByTestId('qa-tools')).toBeNull();
@@ -105,11 +112,15 @@ describe('QaTools', () => {
     vi.resetModules();
     const { QaTools } = await import('~/components/dev/QaTools');
     render(<QaTools />);
-    // fetch to localhost:0 always fails — the catch reports.
+    // The runtime fetch goes to a `.invalid` host (RFC 6761 — always
+    // NXDOMAIN). On-device that's a real network rejection; in jsdom
+    // / Node the fetch also rejects (no DNS resolution). `waitFor`
+    // polls until the catch handler has reported, replacing the
+    // brittle fixed-timeout we had before.
     fireEvent.click(screen.getByTestId('qa-tools-fetch-fail'));
-    // Wait for the catch handler.
-    await new Promise((r) => setTimeout(r, 50));
-    expect(reportErrorSpy).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(reportErrorSpy).toHaveBeenCalledTimes(1);
+    });
     expect(reportErrorSpy.mock.calls[0]?.[0]).toBe('qa-tools-deliberate-fetch-error');
   });
 });
