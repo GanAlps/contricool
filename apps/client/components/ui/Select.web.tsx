@@ -1,5 +1,3 @@
-import { Platform } from 'react-native';
-
 import { cn } from '~/lib/utils';
 
 export type SelectOption = { label: string; value: string };
@@ -16,9 +14,10 @@ export type SelectProps = {
 };
 
 /**
- * Web-only Select for Phase 2d.  RN-Web doesn't ship a native picker,
- * so we render an actual DOM `<select>` on web.  Native phase will
- * swap in a sheet-based picker.
+ * Web Select — renders an actual DOM `<select>` for keyboard
+ * accessibility and native browser dropdown behavior. Native uses
+ * `Select.native.tsx` (Sheet-based picker) since RN-Web has no
+ * built-in picker primitive.
  */
 export function Select({
   value,
@@ -30,11 +29,6 @@ export function Select({
   testID,
   className,
 }: SelectProps) {
-  if (Platform.OS !== 'web') {
-    // Native fallback intentionally absent in 2d.
-    return null;
-  }
-
   return (
     <select
       value={value}
