@@ -71,8 +71,9 @@ Run through every screen before considering the build "soaked." Each numbered it
 ### 4. Verify telemetry
 
 1. Open the Sentry dashboard, filter by `dist:android` (or whatever EAS Build set as `dist`).
-2. Trigger a deliberate JS error from the QA debug button (TBD — Phase 8d adds it) and confirm it lands within 60s.
+2. In the app: Settings → scroll to **QA tools (debug build)** card → tap **Trigger JS error**. Confirm it lands in Sentry within 60s tagged `qa-tools-deliberate-js-error`. Then tap **Trigger fetch error** and confirm a network-failure event also lands tagged `qa-tools-deliberate-fetch-error`.
 3. Verify the event is **scrubbed**: no `email`, no `password`, no `Authorization` header, no `refresh_token` anywhere in the payload (Issues view → Event JSON tab).
+4. The QA tools card is hidden in production builds (gated on `EXPO_PUBLIC_ENV !== 'production'`); if you don't see it, your build was tagged production. Either rebuild with the preview profile or set `EXPO_PUBLIC_ENV=preview` in `eas.json`.
 
 If a PII leak is found here, RED LINE 1 fail — file an immediate fix and roll back to the previous APK on your device.
 

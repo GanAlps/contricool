@@ -2,6 +2,7 @@ import { Link, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Platform, ScrollView, Text, TextInput, View } from 'react-native';
 
+import { QaTools } from '~/components/dev/QaTools';
 import { Button } from '~/components/ui/Button';
 import { Card } from '~/components/ui/Card';
 import { Sheet } from '~/components/ui/Sheet';
@@ -198,6 +199,8 @@ export default function SettingsScreen() {
             </Link>
           </View>
         </Card>
+
+        <QaTools />
       </View>
 
       <Sheet
