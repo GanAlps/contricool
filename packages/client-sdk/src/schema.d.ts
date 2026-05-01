@@ -719,6 +719,8 @@ export interface components {
             expires_in: number;
             /** Id Token */
             id_token: string;
+            /** Refresh Token */
+            refresh_token?: string | null;
             user: components["schemas"]["LoginUser"];
         };
         /** LoginUser */
@@ -816,6 +818,11 @@ export interface components {
             paid_amount: number | string;
             /** User Id */
             user_id: string;
+        };
+        /** RefreshRequest */
+        RefreshRequest: {
+            /** Refresh Token */
+            refresh_token?: string | null;
         };
         /** RefreshResponse */
         RefreshResponse: {
@@ -1180,7 +1187,9 @@ export interface operations {
     login_v1_auth_login_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-client-platform"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1237,7 +1246,11 @@ export interface operations {
                 rt?: string | null;
             };
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RefreshRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

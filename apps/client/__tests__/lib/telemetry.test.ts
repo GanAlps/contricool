@@ -178,4 +178,34 @@ describe('postTelemetry', () => {
     expect(b.value).toBe(2200);
     expect(b.extra.rating).toBe('good');
   });
+
+  it('redacts denylist keys before posting (PII never leaves the device)', async () => {
+    // RED LINE 1: even telemetry payloads must not leak PII. The redactor
+    // is wired in postTelemetry; this test is the safety net.
+    let body: unknown = null;
+    server.use(
+      http.post(`${BASE}/telemetry/error`, async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({ accepted: true }, { status: 202 });
+      }),
+    );
+    await postTelemetry({
+      level: 'error',
+      name: 'auth-failure',
+      extra: {
+        // These are the canonical leak vectors — adding to the bag
+        // simulates a future caller that forgot to scrub.
+        email: 'user@example.com',
+        password: 'plaintext',
+        authorization: 'Bearer leaked-jwt',
+        // A non-sensitive sibling key proves we don't over-redact.
+        request_id: 'req-123',
+      },
+    });
+    const b = body as { extra: Record<string, string> };
+    expect(b.extra.email).toBe('[REDACTED]');
+    expect(b.extra.password).toBe('[REDACTED]');
+    expect(b.extra.authorization).toBe('[REDACTED]');
+    expect(b.extra.request_id).toBe('req-123');
+  });
 });

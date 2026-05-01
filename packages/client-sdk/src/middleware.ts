@@ -33,6 +33,20 @@ export type AuthMiddlewareOptions = {
    * from the original request URL.
    */
   refreshUrl?: () => string;
+  /**
+   * Native callers (Phase 8a) provide the refresh token from secure
+   * storage. When present and non-null, the middleware sends it in
+   * the refresh request body. Web callers omit this — the middleware
+   * then sends an empty-body refresh and relies on the HttpOnly
+   * cookie.
+   *
+   * Cognito's refresh-token-grant does not rotate the refresh token,
+   * so persistence on login is sufficient — the value returned here
+   * stays constant for 30 days. The auth driver is responsible for
+   * capturing the body-returned refresh token on login and clearing
+   * secure storage on sign-out.
+   */
+  getRefreshToken?: () => Promise<string | null> | string | null;
 };
 
 const RETRY_FLAG = Symbol.for('contricool.no-retry');
@@ -124,9 +138,20 @@ export function authMiddleware(opts: AuthMiddlewareOptions): Middleware {
 
       if (response.status === 401 && !isAuthBootstrapPath(url.pathname) && !alreadyRetried) {
         const refreshUrl = (opts.refreshUrl ?? (() => defaultRefreshUrl(request.url)))();
+        // Native callers (Phase 8a) provide the refresh token via
+        // `getRefreshToken`; we pass it in the body. Web callers leave
+        // this undefined — body is empty and the HttpOnly cookie picks
+        // it up on the server.
+        const nativeRefreshToken = opts.getRefreshToken ? await opts.getRefreshToken() : null;
+        const refreshHeaders = new Headers({ 'content-type': 'application/json' });
+        if (nativeRefreshToken) {
+          refreshHeaders.set('x-client-platform', 'native');
+        }
         const refreshReq = new Request(refreshUrl, {
           method: 'POST',
           credentials: 'include',
+          headers: refreshHeaders,
+          body: nativeRefreshToken ? JSON.stringify({ refresh_token: nativeRefreshToken }) : null,
         });
         // Mark so the response of this very call doesn't recurse.
         (refreshReq as FlaggedRequest)[RETRY_FLAG] = true;

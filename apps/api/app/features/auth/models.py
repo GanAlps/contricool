@@ -81,9 +81,21 @@ class LoginResponse(BaseModel):
     id_token: str
     expires_in: int
     user: LoginUser
+    # Native callers (X-Client-Platform: native) receive the refresh
+    # token in the body for storage in expo-secure-store; web callers
+    # continue to receive it via HttpOnly Set-Cookie and this field is
+    # ``None``. Returning it in body to web would be an XSS exfil
+    # surface, so the route gates this on the header.
+    refresh_token: str | None = None
 
 
 # ---- Refresh ---------------------------------------------------------
+
+
+class RefreshRequest(_StrictModel):
+    # Optional body for native callers; web callers omit the body and
+    # the route reads the ``rt`` HttpOnly cookie instead.
+    refresh_token: str | None = None
 
 
 class RefreshResponse(BaseModel):

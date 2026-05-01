@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json.schemastore.org/eas.json",
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "gradleCommand": ":app:assembleDebug",
+        "resourceClass": "large",
+        "buildType": "apk"
+      },
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "OVERRIDE-VIA-EAS-ENV-FILE"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease",
+        "resourceClass": "large"
+      },
+      "ios": {
+        "simulator": false,
+        "resourceClass": "m-medium"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "OVERRIDE-VIA-EAS-ENV-FILE"
+      }
+    },
+    "production": {
+      "android": {
+        "buildType": "app-bundle",
+        "resourceClass": "large"
+      },
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "OVERRIDE-VIA-EAS-ENV-FILE"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

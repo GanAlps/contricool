@@ -25,6 +25,13 @@ export type ClientOptions = {
   onUnauthenticated: () => Promise<void> | void;
   /** Called after a successful refresh so the store can store new tokens. */
   onTokenRefreshed?: (tokens: { access_token: string; id_token: string }) => void;
+  /**
+   * Native callers (Phase 8a): returns the refresh token from
+   * platform-secure storage (expo-secure-store). When provided and
+   * non-null, the middleware sends it in the body of the auto-refresh
+   * call. Web omits this and the HttpOnly cookie carries the value.
+   */
+  getRefreshToken?: () => Promise<string | null> | string | null;
 };
 
 export type ContricoolClient = ReturnType<typeof createOpenapiClient<paths>>;

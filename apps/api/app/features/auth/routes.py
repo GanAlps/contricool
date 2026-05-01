@@ -5,7 +5,7 @@ service-layer functions in :mod:`app.features.auth.service`.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Cookie, Depends, Request, Response, status
+from fastapi import APIRouter, Cookie, Depends, Header, Request, Response, status
 
 from app.core.dependencies import current_principal
 from app.core.principal import Principal
@@ -16,6 +16,7 @@ from app.features.auth.models import (
     ForgotPasswordResponse,
     LoginRequest,
     LoginResponse,
+    RefreshRequest,
     RefreshResponse,
     ResendEmailCodeRequest,
     ResendEmailCodeResponse,
@@ -32,6 +33,17 @@ from app.features.auth.rate_limit import RateLimitExceeded
 _REFRESH_COOKIE_NAME = "rt"
 _REFRESH_COOKIE_PATH = "/v1/auth"
 _REFRESH_COOKIE_MAX_AGE = 30 * 86400  # 30 days
+
+# Native clients (Phase 8a) declare themselves via this header so login
+# returns the refresh token in the response body for storage in
+# expo-secure-store. Web omits the header and receives the refresh
+# token via an HttpOnly Set-Cookie.
+_PLATFORM_HEADER = "x-client-platform"
+_PLATFORM_NATIVE = "native"
+
+
+def _is_native_client(platform: str | None) -> bool:
+    return (platform or "").strip().lower() == _PLATFORM_NATIVE
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -102,10 +114,22 @@ async def resend_email_code(
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(req: LoginRequest, response: Response) -> LoginResponse:
+async def login(
+    req: LoginRequest,
+    response: Response,
+    x_client_platform: str | None = Header(default=None, alias=_PLATFORM_HEADER),
+) -> LoginResponse:
     body, refresh_token = service.login(req)
-    if refresh_token:
-        _set_refresh_cookie(response, refresh_token)
+    if not refresh_token:
+        return body
+    if _is_native_client(x_client_platform):
+        # Native: hand the refresh token back in the body so the client
+        # can persist it in platform-secure storage. No Set-Cookie —
+        # native clients don't carry cookies and a stray ``Set-Cookie``
+        # would only confuse intermediaries.
+        return body.model_copy(update={"refresh_token": refresh_token})
+    # Web (default): HttpOnly cookie, body keeps ``refresh_token=None``.
+    _set_refresh_cookie(response, refresh_token)
     return body
 
 
@@ -115,22 +139,29 @@ async def login(req: LoginRequest, response: Response) -> LoginResponse:
 @router.post("/refresh", response_model=RefreshResponse)
 async def refresh(
     response: Response,
+    body: RefreshRequest | None = None,
     rt: str | None = Cookie(default=None),
 ) -> RefreshResponse:
-    if not rt:
+    # Native clients send the refresh token in the body (no cookie jar
+    # in expo's fetch). Web clients send no body and rely on the
+    # HttpOnly cookie. Body wins when both are present.
+    refresh_token = (body.refresh_token if body and body.refresh_token else None) or rt
+    if not refresh_token:
         raise AuthError(
             code="MISSING_REFRESH_TOKEN",
             http_status=401,
             message="Refresh token is missing.",
         )
     try:
-        return service.refresh(rt)
+        return service.refresh(refresh_token)
     except AuthError as e:
         if e.http_status == 401:
             # Bad refresh — clear the dead cookie before re-raising.
             # Setting it on the route's ``response`` doesn't help when
             # we're about to raise; flag the AuthError so the handler
-            # adds the clear-cookie header to its envelope.
+            # adds the clear-cookie header to its envelope. (Native
+            # clients have no cookie to clear; the flag is a no-op for
+            # them and the 401 is what triggers a forced sign-out.)
             e.clear_refresh_cookie = True
         raise
 

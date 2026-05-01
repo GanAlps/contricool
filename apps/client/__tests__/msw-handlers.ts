@@ -31,6 +31,9 @@ export const defaultHandlers = [
   ),
   http.post(`${BASE}/auth/login`, async ({ request }) => {
     const body = (await request.json()) as LoginBody;
+    // Mirror the backend's X-Client-Platform header behavior so native
+    // tests see the same wire shape they will in production.
+    const isNative = (request.headers.get('x-client-platform') ?? '').toLowerCase() === 'native';
     return HttpResponse.json(
       {
         access_token: 'access-jwt',
@@ -42,22 +45,51 @@ export const defaultHandlers = [
           currency: 'USD',
           _email: body.email,
         },
+        refresh_token: isNative ? 'refresh-token-from-body' : null,
       },
       {
         status: 200,
-        headers: {
-          'set-cookie':
-            'rt=refresh-token; HttpOnly; Secure; SameSite=Strict; Path=/v1/auth; Max-Age=2592000',
-        },
+        headers: isNative
+          ? {}
+          : {
+              'set-cookie':
+                'rt=refresh-token; HttpOnly; Secure; SameSite=Strict; Path=/v1/auth; Max-Age=2592000',
+            },
       },
     );
   }),
-  http.post(`${BASE}/auth/refresh`, async () =>
-    HttpResponse.json(
+  http.post(`${BASE}/auth/refresh`, async ({ request }) => {
+    // Mirror backend: native sends refresh_token in body; web sends
+    // empty body and relies on the HttpOnly cookie. Either path
+    // returns the same RefreshResponse shape.
+    let body: { refresh_token?: string | null } | null = null;
+    if ((request.headers.get('content-type') ?? '').includes('application/json')) {
+      try {
+        body = (await request.json()) as { refresh_token?: string | null };
+      } catch {
+        body = null;
+      }
+    }
+    if (
+      (request.headers.get('x-client-platform') ?? '').toLowerCase() === 'native' &&
+      !body?.refresh_token
+    ) {
+      return HttpResponse.json(
+        {
+          error: {
+            code: 'MISSING_REFRESH_TOKEN',
+            message: 'no refresh token',
+            request_id: 'r',
+          },
+        },
+        { status: 401 },
+      );
+    }
+    return HttpResponse.json(
       { access_token: 'access-jwt-2', id_token: 'id-jwt-2', expires_in: 3600 },
       { status: 200 },
-    ),
-  ),
+    );
+  }),
   http.post(`${BASE}/auth/logout`, async ({ request }) => {
     // Phase 2c R6.1 + PR #22 two-token contract: logout requires
     //   Authorization: Bearer <id_token>
