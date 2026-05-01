@@ -113,10 +113,10 @@ as input.
 | `percent` | For first n-1 members emit `round(amount * percent[i] / Decimal('100'), 2, ROUND_HALF_UP)`; last absorbs remainder. (`models.py` ensures sum is `100 ± 0.01`.) |
 
 **Why "last member absorbs the remainder"**: deterministic and
-auditable; mirrors Splitwise's behaviour. The "last" member is the
-last entry in the **server-sorted** member list (by `user_id`
-ascending) so the absorber is reproducible across replays of the same
-input.
+auditable; matches the convention common to expense-splitting apps.
+The "last" member is the last entry in the **server-sorted** member
+list (by `user_id` ascending) so the absorber is reproducible across
+replays of the same input.
 
 **Settlement type** sets `split_method = amount` with exactly 2
 members + 1 payer; `splits.py` short-circuits to that branch and

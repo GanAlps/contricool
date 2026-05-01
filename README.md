@@ -1,6 +1,6 @@
 # ContriCool
 
-A simpler Splitwise — track shared transactions with friends. AWS-hosted, web-first with a single Expo + React Native + RN-Web codebase that ships to web today and iOS / Android tomorrow.
+Track shared transactions with friends — split expenses, settle balances, keep a clean audit trail. AWS-hosted, web-first with a single Expo + React Native + RN-Web codebase that ships to web today and iOS / Android tomorrow.
 
 The repo is **public**. Treat every commit as a press release: no secrets, no environment-specific identifiers in source. See [`CLAUDE.md`](CLAUDE.md) for the project red lines and conventions.
 

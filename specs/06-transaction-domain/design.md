@@ -107,7 +107,7 @@ Storing payers inline on META rather than as separate rows saves M writes per tr
 
 - **Min members**: 2 (creator + at least one other). A "transaction" with only yourself is meaningless; redirect to `note` or a personal-expense feature later.
 - **Max members at MVP**: 10. Sufficient for dinners, trips, and house expenses — the common use cases. The schema is technically capable of more (the TransactWriteItems limit doesn't bite until ~45 members after Design 7's simplification), but 10 keeps MVP scope tight; raising the cap post-MVP is a one-line change.
-- **Creator must be in `members`**: enforced server-side. Splitwise allows recording transactions you're not part of; we don't, to keep mental model simple.
+- **Creator must be in `members`**: enforced server-side. Some apps in this space let you record transactions you're not part of; we don't, to keep the mental model simple.
 - **All non-creator members must be current friends of creator** (existence of the canonical FRIENDSHIP row in `ContriCool-Users-<env>`).
 - **Payers must be a subset of members.** A non-member cannot have paid.
 - **Single payer is the common case** (`paid_by_creator: true` → one payer = creator); UI defaults to this. Multiple payers supported in the data model from day one.

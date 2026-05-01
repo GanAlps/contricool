@@ -33,7 +33,7 @@ Three roles + resource ownership:
 | `Transaction` | list with friend X | requester is a current friend of X (returns transactions where both parties are members; includes historical transactions even if the friendship was once removed) |
 
 Notes on the rules:
-- **Members can read; only creator can write.** Splitwise behavior diverges (any member can edit) — we choose creator-only for MVP simplicity and audit clarity.
+- **Members can read; only creator can write.** Some apps in this space let any member edit — we choose creator-only for MVP simplicity and audit clarity.
 - **Friendship gates transactions.** Transactions can only be created among current friends to prevent random-stranger debt-spam. The add-transaction UI suggests only the requester's current friends.
 - **No accept/decline at MVP.** When user A enters user B's **email** and B is on the platform, the friendship is created **bilaterally and immediately** — no pending state, no inbox, no approval. Both users instantly see each other in their friend list. The only abuse mitigation is that A must already know B's exact email (no fuzzy search, no enumeration of suggestions). **Phone is not a friend-add identifier at MVP** — see Design 4 / CONSTRAINTS.md.
 - **No blocking at MVP.** Either party can `remove` a friendship at any time, which drops the row and stops new transactions involving the pair (existing transactions remain visible). Block/unblock is deferred.
@@ -229,7 +229,7 @@ Built from JWT claims by middleware once per request and stashed at `request.sta
 
 ## Open Questions
 
-1. **Should non-creator members be allowed to edit transactions?** Splitwise allows it. MVP says no for simplicity. Revisit with users.
+1. **Should non-creator members be allowed to edit transactions?** Some apps in this space allow it. MVP says no for simplicity. Revisit with users.
 2. **Should we surface "user X exists on ContriCool" before friend-request?** Privacy-preserving alternative: always say "request sent" regardless of whether the target exists; if they don't, store as a pending-invite and email/SMS them an invite. Decision deferred to Domain Design (06).
 3. **AWS Verified Permissions** — re-evaluate in 6 months. If rules grow past ~15 distinct policies, migrate `policy.py` to Cedar.
 

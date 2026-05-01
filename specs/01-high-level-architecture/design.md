@@ -2,7 +2,7 @@
 
 ## Overview
 
-ContriCool is a Splitwise-lite app for tracking shared transactions among friends. This design fixes the system shape — components, boundaries, and data flow — for a web-first launch on AWS that adds iOS/Android apps later **from the same codebase**. Design level: **HLD + System** (we lock the AWS topology because every downstream design depends on it). The chosen shape is a **React-Native-Web client (Expo) + JSON API + serverless backend**, all clients (web today, mobile tomorrow) talking to the **same versioned API**, served via **one CloudFront distribution** that fans out path-based to S3 (web bundle) and API Gateway (API). MVP runs on the **default CloudFront domain** (free) with a clean upgrade path to `contricool.com` later. Everything stays in **one AWS account** with strict resource-prefix and IAM-scoped separation between `dev` and `prod`.
+ContriCool is a lightweight expense-splitting app for tracking shared transactions among friends. This design fixes the system shape — components, boundaries, and data flow — for a web-first launch on AWS that adds iOS/Android apps later **from the same codebase**. Design level: **HLD + System** (we lock the AWS topology because every downstream design depends on it). The chosen shape is a **React-Native-Web client (Expo) + JSON API + serverless backend**, all clients (web today, mobile tomorrow) talking to the **same versioned API**, served via **one CloudFront distribution** that fans out path-based to S3 (web bundle) and API Gateway (API). MVP runs on the **default CloudFront domain** (free) with a clean upgrade path to `contricool.com` later. Everything stays in **one AWS account** with strict resource-prefix and IAM-scoped separation between `dev` and `prod`.
 
 ## High Level Design
 

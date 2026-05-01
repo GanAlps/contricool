@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 
 import { cn } from '~/lib/utils';
 
@@ -12,27 +12,24 @@ export type SheetProps = {
 };
 
 /**
- * Minimal Phase 3b modal: backdrop + foreground card.  No animation
- * — the Phase 4 design wires reanimated; an MVP modal is fine
- * static.  RN-Web compatible (Pressable + View only).
+ * Web Sheet — backdrop + centered foreground card. No animation;
+ * RN-Web compatible (Pressable + View + ScrollView).
  *
  * The outer container uses ``fixed inset-0`` (NativeWind →
- * CSS ``position: fixed``) so the overlay is **viewport**-relative
- * on web, not container-relative. With ``absolute inset-0`` the
- * sheet was clipped by whichever ancestor screen rendered it,
- * so a short transactions list left the modal hidden behind the
- * top-bar nav (issue reported 2026-04-30).
+ * CSS ``position: fixed``) so the overlay is **viewport**-relative,
+ * not container-relative. With ``absolute inset-0`` the sheet was
+ * clipped by whichever ancestor screen rendered it (issue reported
+ * 2026-04-30).
  *
- * On native, RN treats ``position: fixed`` as ``absolute`` (no
- * viewport concept). The web-only behavior is acceptable at MVP
- * since the native bundle hasn't shipped; when EAS native ships
- * we'll either keep ``absolute`` (modal scoped to the screen) or
- * port to ``react-native-modal`` for a true native overlay.
+ * Native uses a separate ``Sheet.native.tsx`` backed by RN's
+ * ``Modal`` with ``presentationStyle="pageSheet"`` — RN coerces
+ * ``position: fixed`` to ``absolute`` (no viewport concept), which
+ * clipped the modal inside its parent screen on phones.
  *
  * The inner foreground card is constrained to ``max-h-[90vh]``
- * with internal scrolling so an oversized form (e.g. amount-split
- * with 10 members + the multi-payer editor) doesn't overflow the
- * viewport.
+ * with an internal ``ScrollView`` so an oversized form (e.g.
+ * amount-split with 10 members + the multi-payer editor) scrolls
+ * instead of overflowing the viewport.
  */
 export function Sheet({ open, onClose, title, children, testID }: SheetProps) {
   if (!open) {
@@ -63,7 +60,7 @@ export function Sheet({ open, onClose, title, children, testID }: SheetProps) {
             <Text className="text-base text-neutral-700">×</Text>
           </Pressable>
         </View>
-        <View className="p-4">{children}</View>
+        <ScrollView contentContainerClassName="p-4">{children}</ScrollView>
       </View>
     </View>
   );
