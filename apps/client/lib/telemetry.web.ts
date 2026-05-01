@@ -1,9 +1,13 @@
 /**
- * Frontend telemetry client.
+ * Web telemetry client (Phase 8a — split out of `telemetry.ts`).
  *
  * Posts uncaught errors and Web Vitals to the backend
  * `/v1/telemetry/error` sink. The route is public (no auth needed)
  * so a logged-out error-boundary capture still lands.
+ *
+ * Native uses `telemetry.native.ts` which forwards to Sentry directly
+ * (symbolicated stacks + native crash capture, neither of which the
+ * backend sink provides).
  *
  * The client deliberately:
  *   - does not import the SDK (the SDK injects an Authorization
