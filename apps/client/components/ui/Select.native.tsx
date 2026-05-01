@@ -82,7 +82,17 @@ export function Select({
                 accessibilityRole="menuitem"
                 accessibilityState={{ selected: isSelected }}
                 onPress={() => {
-                  onChange(opt.value);
+                  // Don't fire onChange when the user taps the already-
+                  // selected option — saves a needless re-render in the
+                  // parent and a no-op network call if the consumer
+                  // treats onChange as "user picked something new."
+                  // Also covers the double-tap case: the second tap of a
+                  // rapid double-tap on an already-fired option arrives
+                  // when this option is now the selected one, so the
+                  // guard keeps onChange idempotent.
+                  if (!isSelected) {
+                    onChange(opt.value);
+                  }
                   setOpen(false);
                 }}
                 testID={testID ? `${testID}-option-${opt.value}` : undefined}
