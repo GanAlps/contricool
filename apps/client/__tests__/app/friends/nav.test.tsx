@@ -128,6 +128,7 @@ describe('(app)/_layout — mobile (narrow viewport)', () => {
     mockWidth = 375;
     resetRouterMock();
     useAuthStore.getState()._clear();
+    useToasterStore.getState().clear();
     useAuthStore.setState({
       user: { user_id: 'me', name: 'Me', currency: 'USD' },
       loading: false,
@@ -136,6 +137,7 @@ describe('(app)/_layout — mobile (narrow viewport)', () => {
   afterEach(() => {
     mockWidth = 1280;
     useAuthStore.getState()._clear();
+    useToasterStore.getState().clear();
   });
 
   it('collapses nav into a hamburger trigger and hides desktop nav links', () => {
@@ -161,5 +163,42 @@ describe('(app)/_layout — mobile (narrow viewport)', () => {
     fireEvent.click(screen.getByTestId('topbar-menu-friends'));
     expect(getRouterMock().calls).toContainEqual({ kind: 'push', href: '/friends' });
     expect(screen.queryByTestId('topbar-menu-friends')).not.toBeInTheDocument();
+  });
+
+  // RED LINE 3: the mobile dropdown's sign-out button (`topbar-menu-signout`)
+  // is a separate DOM path from the desktop `topbar-signout`, so the
+  // network-failure path needs its own negative-test coverage.
+  it('N16: mobile sign-out network failure clears state, surfaces a toast, redirects, and closes the menu', async () => {
+    server.use(
+      http.post('http://localhost/v1/auth/logout', () =>
+        HttpResponse.json(
+          { error: { code: 'INTERNAL', message: 'oops', request_id: 'r' } },
+          { status: 500 },
+        ),
+      ),
+    );
+    useAuthStore.setState({
+      user: { user_id: 'u', name: 'Alice', currency: 'USD' },
+      accessToken: 't',
+      idToken: 'i',
+      loading: false,
+    });
+    render(
+      <>
+        <AppLayout />
+        <Toaster />
+      </>,
+    );
+    fireEvent.click(screen.getByTestId('topbar-menu-trigger'));
+    fireEvent.click(screen.getByTestId('topbar-menu-signout'));
+    expect(await screen.findByTestId('toast-error')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(getRouterMock().calls).toContainEqual({ kind: 'replace', href: '/login' }),
+    );
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().accessToken).toBeNull();
+    // The menu must collapse on sign-out so the user isn't left with a
+    // stale dropdown over the redirect target.
+    expect(screen.queryByTestId('topbar-menu-signout')).not.toBeInTheDocument();
   });
 });

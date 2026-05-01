@@ -209,7 +209,7 @@ export default function SettingsScreen() {
         title="Delete account?"
         testID="settings-delete-confirm"
       >
-        <View className="gap-3 p-4">
+        <View className="gap-3">
           <Text className="text-sm text-neutral-700">
             This will deactivate your account and sign you out of every device. Your data will be
             hard-deleted after 30 days. Are you sure?

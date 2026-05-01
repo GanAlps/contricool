@@ -34,6 +34,7 @@ export function Sheet({ open, onClose, title, children, testID }: SheetProps) {
       animationType="slide"
       presentationStyle="pageSheet"
       transparent={false}
+      statusBarTranslucent
       testID={testID ?? 'sheet'}
     >
       <SafeAreaView className="flex-1 bg-white" edges={['top', 'bottom']}>

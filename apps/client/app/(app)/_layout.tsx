@@ -105,6 +105,12 @@ export default function AppLayout() {
         </View>
 
         {isMobile && menuOpen ? (
+          // TODO(native z-index): RN's z-order on iOS doesn't always
+          // honor `z-50` against later siblings the way the web does;
+          // the wrapping `relative z-50` View covers the common case
+          // here, but if the dropdown ever paints under Stack content
+          // on a real device, port this to a `Modal`-backed
+          // `_layout.native.tsx` variant instead.
           <View
             testID="topbar-menu"
             className="absolute inset-x-0 top-full border-b border-neutral-200 bg-white shadow-md"
