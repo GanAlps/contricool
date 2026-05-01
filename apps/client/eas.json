@@ -17,7 +17,8 @@
         "simulator": true
       },
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "OVERRIDE-VIA-EAS-ENV-FILE"
+        "EXPO_PUBLIC_API_BASE_URL": "OVERRIDE-VIA-EAS-ENV-FILE",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       }
     },
     "preview": {
@@ -32,7 +33,8 @@
         "resourceClass": "m-medium"
       },
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "OVERRIDE-VIA-EAS-ENV-FILE"
+        "EXPO_PUBLIC_API_BASE_URL": "OVERRIDE-VIA-EAS-ENV-FILE",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       }
     },
     "production": {
