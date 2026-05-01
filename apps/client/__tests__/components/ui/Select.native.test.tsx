@@ -88,4 +88,47 @@ describe('Select.native', () => {
     // doesn't crash on the invalid path and the trigger still renders.
     expect(screen.getByTestId('curr')).toBeTruthy();
   });
+
+  // Backdrop / close-button behavior — verify the dismiss paths
+  // don't accidentally fire onChange. Without this gap protection,
+  // a future regression (e.g. wrapping the Sheet's onClose in an
+  // onChange-firing handler) would not be caught.
+  it('backdrop press closes the sheet without firing onChange', () => {
+    const onChange = vi.fn();
+    render(
+      <Select testID="curr" ariaLabel="Currency" value="USD" onChange={onChange} options={opts} />,
+    );
+    fireEvent.click(screen.getByTestId('curr'));
+    // Sheet builds its backdrop testID from the parent testID:
+    // `${parent}-backdrop`. Our parent passes `${testID}-sheet` to
+    // Sheet, so the backdrop is `curr-sheet-backdrop`.
+    fireEvent.click(screen.getByTestId('curr-sheet-backdrop'));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('curr-option-INR')).toBeNull();
+  });
+
+  it('close button (×) closes the sheet without firing onChange', () => {
+    const onChange = vi.fn();
+    render(
+      <Select testID="curr" ariaLabel="Currency" value="USD" onChange={onChange} options={opts} />,
+    );
+    fireEvent.click(screen.getByTestId('curr'));
+    fireEvent.click(screen.getByTestId('curr-sheet-close'));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('curr-option-INR')).toBeNull();
+  });
+
+  it('tapping the already-selected option does NOT fire onChange (idempotency / double-tap guard)', () => {
+    const onChange = vi.fn();
+    render(
+      <Select testID="curr" ariaLabel="Currency" value="USD" onChange={onChange} options={opts} />,
+    );
+    fireEvent.click(screen.getByTestId('curr'));
+    fireEvent.click(screen.getByTestId('curr-option-USD'));
+    // Same value tapped → onChange must not fire (saves a redundant
+    // parent re-render and an idempotent-but-wasted network call).
+    expect(onChange).not.toHaveBeenCalled();
+    // Sheet still closes — the user's intent was "I'm done picking."
+    expect(screen.queryByTestId('curr-option-INR')).toBeNull();
+  });
 });

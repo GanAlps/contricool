@@ -24,25 +24,27 @@
 
 ## Per-release flow — Option A (recommended): EAS local build → Xcode install
 
-This keeps you on the cloud build pipeline (consistent with Android) but produces a `.app` you can drag into Xcode.
+This keeps you on the cloud build pipeline (consistent with Android) but produces an `.ipa` you can drag into Xcode.
 
 ### 1. Build locally
 
 ```bash
 cd apps/client
-pnpm dlx eas-cli build --profile development --platform ios --local
+pnpm dlx eas-cli build --profile preview --platform ios --local
 ```
 
-`--local` runs the build on your Mac instead of EAS Cloud. Output: a `.tar.gz` containing `ContriCool.app`. Wall-clock: **~15–20 min** on an M-series Mac.
+**Use `--profile preview`, NOT `development`**, for sideload. The `development` profile in `eas.json` has `simulator: true` — it builds a Simulator-only artifact (x86_64 / arm64-simulator slice) that **cannot install on a physical iPhone** and Xcode's drag-drop will fail with a cryptic architecture error. The `preview` profile has `simulator: false` and produces a device-deployable `.ipa`.
 
-Why `development` profile rather than `preview`: the dev profile produces a `.app` (uninstalled bundle) suitable for direct device install. `preview` produces a `.ipa` which still works but takes an extra step in Xcode.
+`--local` runs the build on your Mac instead of EAS Cloud, which is required for free Apple-ID signing (EAS Cloud doesn't accept personal-team profiles for cloud signing). Output: an `.ipa` archive. Wall-clock: **~15–20 min** on an M-series Mac.
+
+If you specifically want a Simulator build for desktop testing (no iPhone in hand), keep the `development` profile and install the `.app` via `xcrun simctl install booted <path>` instead.
 
 ### 2. Install via Xcode
 
 1. Plug in the iPhone, unlock it.
 2. Xcode → Window → Devices and Simulators (`Cmd+Shift+2`).
 3. Select your iPhone in the left panel.
-4. Drag the extracted `ContriCool.app` into the **Installed Apps** list.
+4. Drag the `.ipa` into the **Installed Apps** list (Xcode unwraps the archive automatically).
 5. Watch the progress bar — installation takes ~30s. The app icon appears on the home screen.
 
 ### 3. First-launch trust prompt
@@ -116,9 +118,13 @@ If you find yourself re-installing 4× per month, that's the trigger to enroll i
 # List paired devices visible to Xcode
 xcrun xctrace list devices
 
-# Stream logs from the device (replace with your device UDID from above)
+# Stream logs from a real device:
+#   open Console.app → in the left sidebar pick your iPhone → filter
+#   the search bar by "ContriCool". The device must be plugged in and
+#   trusted (the same Trust prompt as the first install).
+#
+# For Simulator only (NOT a real device):
 xcrun simctl spawn booted log stream --predicate 'process == "ContriCool"'
-# or for a real device, use Console.app → select device → filter by "ContriCool"
 
 # Force-quit the app from Mac
 xcrun devicectl device process terminate --device <udid> --bundle-id com.contricool.app
