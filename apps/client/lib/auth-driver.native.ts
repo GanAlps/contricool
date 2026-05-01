@@ -14,8 +14,18 @@
 import { apiClient } from './api';
 import type { AuthDriver } from './auth-driver-types';
 import { clearRefreshToken, getRefreshToken, setRefreshToken } from './secure-storage';
+import type { RefreshResponse } from './types';
 
 const PLATFORM_HEADER = { 'X-Client-Platform': 'native' };
+
+// Module-level single-flight guard for explicit refresh calls. The
+// auth bootstrap in `_layout.tsx` and any in-flight query that lands
+// during the bootstrap can both invoke `refreshSession()`; without
+// dedup, both would race the same Cognito refresh-token-grant — and
+// Cognito's atomic refresh-token rotation (when it lands) would
+// invalidate one of the responses. Returning the in-flight Promise
+// keeps the wire to a single round-trip.
+let inflightRefresh: Promise<RefreshResponse> | null = null;
 
 export const nativeAuthDriver: AuthDriver = {
   signUp: async (input) => {
@@ -55,12 +65,32 @@ export const nativeAuthDriver: AuthDriver = {
     //      method directly. We have to read secure-storage and pass
     //      the token in the body ourselves; openapi-fetch doesn't run
     //      the middleware's refresh helper for explicit requests.
-    const refresh_token = await getRefreshToken();
-    const r = await apiClient.POST('/auth/refresh', {
-      body: { refresh_token },
-      headers: PLATFORM_HEADER,
-    });
-    return r.data!;
+    if (inflightRefresh) {
+      return inflightRefresh;
+    }
+    const promise = (async () => {
+      try {
+        const refresh_token = await getRefreshToken();
+        const r = await apiClient.POST('/auth/refresh', {
+          body: { refresh_token },
+          headers: PLATFORM_HEADER,
+        });
+        return r.data!;
+      } catch (e) {
+        // RED LINE 3: a 401 (or any failure) from the refresh endpoint
+        // means the stored token is dead. Wipe secure storage so the
+        // next sign-in path is "re-enter password," not a boot loop
+        // against an invalid token.
+        await clearRefreshToken();
+        throw e;
+      }
+    })();
+    inflightRefresh = promise;
+    try {
+      return await promise;
+    } finally {
+      inflightRefresh = null;
+    }
   },
   signOut: async () => {
     let driverErr: unknown = null;

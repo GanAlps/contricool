@@ -10,7 +10,7 @@
 import { type ContricoolClient, createClient } from '@contricool/client-sdk';
 
 import { useAuthStore } from './auth-store';
-import { getRefreshToken } from './secure-storage';
+import { clearRefreshToken, getRefreshToken } from './secure-storage';
 
 /** Singleton SDK client used by the auth driver and (later) feature modules. */
 export const apiClient: ContricoolClient = createClient({
@@ -23,7 +23,13 @@ export const apiClient: ContricoolClient = createClient({
     return { accessToken: s.accessToken, idToken: s.idToken };
   },
   onUnauthenticated: async () => {
+    // Clear in-memory state AND platform-secure storage. Without the
+    // latter, a dead refresh token survives the implicit 401-retry
+    // failure and re-hydrates the next boot with the same bad value,
+    // producing a boot loop. Web's `clearRefreshToken` is a no-op
+    // (cookie cleared by the backend's clear-cookie response header).
     useAuthStore.getState()._clear();
+    await clearRefreshToken();
   },
   onTokenRefreshed: ({ access_token, id_token }) => {
     useAuthStore.getState()._setTokensFromRefresh(access_token, id_token);

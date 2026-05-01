@@ -152,6 +152,63 @@ describe('nativeAuthDriver', () => {
     expect(getRefreshTokenSpy).toHaveBeenCalled();
   });
 
+  // RED LINE 3 — a stored refresh token that the backend rejects (revoked,
+  // tampered, or expired beyond the 30-day window) must not survive the
+  // failed refresh. If we leave the dead value in secure-storage, the next
+  // boot reads it back and we boot-loop against the same 401.
+  it('refreshSession clears secure-storage when backend rejects the stored token (B2)', async () => {
+    memory.set('rt', 'tampered-or-revoked');
+    server.use(
+      http.post('http://localhost/v1/auth/refresh', () =>
+        HttpResponse.json(
+          { error: { code: 'REFRESH_FAILED', message: 'bad token', request_id: 'r' } },
+          { status: 401 },
+        ),
+      ),
+    );
+    await expect(driver.refreshSession()).rejects.toMatchObject({
+      error: { code: 'REFRESH_FAILED' },
+    });
+    expect(clearRefreshTokenSpy).toHaveBeenCalled();
+    expect(memory.has('rt')).toBe(false);
+  });
+
+  // Without single-flight, the boot-time refresh in `_layout.tsx` and any
+  // in-flight authenticated query that lands during bootstrap can both
+  // invoke `refreshSession()`, racing the same Cognito refresh-token-grant.
+  // When Cognito enables atomic rotation, one of the two responses would
+  // be invalidated. Single-flight collapses concurrent calls to one wire
+  // round-trip.
+  it('refreshSession dedups concurrent calls to a single network round-trip (B4 — single-flight)', async () => {
+    memory.set('rt', 'persisted-rt');
+    let networkCalls = 0;
+    server.use(
+      http.post('http://localhost/v1/auth/refresh', async () => {
+        networkCalls += 1;
+        // Yield so the other parallel calls observe the in-flight promise
+        // before this resolves.
+        await new Promise((r) => setTimeout(r, 5));
+        return HttpResponse.json(
+          { access_token: 'a-shared', id_token: 'i-shared', expires_in: 3600 },
+          { status: 200 },
+        );
+      }),
+    );
+    const [r1, r2, r3] = await Promise.all([
+      driver.refreshSession(),
+      driver.refreshSession(),
+      driver.refreshSession(),
+    ]);
+    expect(networkCalls).toBe(1);
+    expect(r1.access_token).toBe('a-shared');
+    expect(r2.access_token).toBe('a-shared');
+    expect(r3.access_token).toBe('a-shared');
+    // After the in-flight resolves, a fresh call should hit the network
+    // again — single-flight is per in-flight Promise, not a permanent cache.
+    await driver.refreshSession();
+    expect(networkCalls).toBe(2);
+  });
+
   it('refreshSession with no stored token surfaces 401 from backend (clean re-login signal)', async () => {
     // No setItem — getRefreshToken returns null.
     server.use(

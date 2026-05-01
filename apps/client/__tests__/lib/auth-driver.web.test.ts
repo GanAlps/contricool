@@ -42,6 +42,30 @@ describe('webAuthDriver', () => {
     expect(r.user.user_id).toBeTruthy();
   });
 
+  // RED LINE 3 — web must NEVER opt into the native body-shape refresh
+  // contract. Sending `X-Client-Platform: native` would make the backend
+  // return the refresh token in the response body where browser JS can
+  // read it, defeating the HttpOnly-cookie XSS defense.
+  it('signIn does NOT send X-Client-Platform header (web stays on cookie path)', async () => {
+    let observedHeader: string | null = '__unset__';
+    server.use(
+      http.post('http://localhost/v1/auth/login', ({ request }) => {
+        observedHeader = request.headers.get('x-client-platform');
+        return HttpResponse.json(
+          {
+            access_token: 'access-jwt',
+            id_token: 'id-jwt',
+            expires_in: 3600,
+            user: { user_id: 'u1', name: 'A', currency: 'USD' },
+          },
+          { status: 200 },
+        );
+      }),
+    );
+    await driver.signIn({ email: 'a@b.com', password: 'P@ssword123!' });
+    expect(observedHeader).toBeNull();
+  });
+
   it('refreshSession posts and returns new tokens', async () => {
     const r = await driver.refreshSession();
     expect(r.access_token).toBe('access-jwt-2');
