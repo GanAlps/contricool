@@ -16,6 +16,7 @@ function txn(over: Partial<TransactionListItem>): TransactionListItem {
     creator_id: '01J0000000000000000000ALI',
     my_owed_amount: '10.00',
     my_paid_amount: '0.00',
+    payer_user_ids: ['01J0000000000000000000ALI'],
     created_at: '2026-04-29T20:00:00Z',
     ...over,
   };

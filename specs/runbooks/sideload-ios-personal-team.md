@@ -66,14 +66,55 @@ If you'd rather skip EAS and build straight from Xcode:
 
 ```bash
 cd apps/client
-pnpm dlx expo prebuild --platform ios --clean
+# Use the project-pinned Expo CLI (`pnpm exec expo`), NOT
+# `pnpm dlx expo` — the latter pulls the latest expo-cli (currently
+# tracking SDK 55 / RN 0.83 templates) and emits an
+# AppDelegate.swift that imports `ReactAppDependencyProvider`,
+# which doesn't exist in our pinned RN 0.76. The project-pinned
+# CLI emits the older AppDelegate.h/.mm that matches RN 0.76.
+pnpm exec expo prebuild --platform ios --clean
 open ios/ContriCool.xcworkspace
 ```
+
+After prebuild, inject the local-only env vars + Xcode 26 C++ override
+(`ios/` is gitignored, so these don't survive a clean prebuild):
+
+```bash
+# 1. Tell the bundler script which API to bake into the JS bundle.
+#    Without this, `lib/api.ts` falls back to '/v1' (relative URL)
+#    which fails on native fetch with no host context.
+cat >> apps/client/ios/.xcode.env.local <<'EOF'
+export SENTRY_DISABLE_AUTO_UPLOAD=true
+export EXPO_PUBLIC_API_BASE_URL=https://<your-dev-cloudfront-domain>/v1
+EOF
+
+# 2. Patch the Podfile post_install hook so every Pod target compiles
+#    with C++20 — Xcode 26's default for some pod build configs is
+#    c++14, which breaks RCT-Folly (`static_assert(__cplusplus >= 201703L)`)
+#    and React-perflogger's `FuseboxTracer.cpp` (uses `std::unordered_map::contains`,
+#    a c++20 feature). Insert just before the closing `end end` of
+#    the existing `post_install do |installer|` block:
+#
+#    installer.pods_project.targets.each do |target|
+#      target.build_configurations.each do |config|
+#        config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++20'
+#        config.build_settings['CLANG_CXX_LIBRARY'] = 'libc++'
+#      end
+#    end
+
+cd apps/client/ios && pod install && cd -
+```
+
+(Folding both into a config plugin so they survive prebuilds is
+tracked as a Phase 8d follow-up.)
 
 In Xcode:
 1. Select the **ContriCool** target → Signing & Capabilities → Team → your personal team.
 2. Select your iPhone as the run destination (top toolbar).
-3. ⌘R to build and run.
+3. **Edit Scheme** (⌘<) → Run → Build Configuration: **Release**.
+   Debug builds expect a Metro packager on `localhost:8081`; Release
+   embeds `main.jsbundle` so the app runs standalone like Android does.
+4. ⌘R to build and run.
 
 This is the fastest iteration loop (Xcode's incremental build) but bypasses EAS, so the artifact isn't reproducible in CI. Use Option A for "official" sideload builds, Option B for active development.
 

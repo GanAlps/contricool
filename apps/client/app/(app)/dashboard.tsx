@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 
 import { AddTransactionSheet } from '~/components/transactions/AddTransactionSheet';
@@ -9,6 +9,7 @@ import { Button } from '~/components/ui/Button';
 import { Card } from '~/components/ui/Card';
 import { Spinner } from '~/components/ui/Spinner';
 import { useAuthStore } from '~/lib/auth-store';
+import { useFriends } from '~/lib/queries/friends';
 import { useTransactions } from '~/lib/queries/transactions';
 
 const RECENT_LIMIT = 10;
@@ -18,8 +19,20 @@ export default function DashboardScreen() {
   const user = useAuthStore((s) => s.user);
   const [addOpen, setAddOpen] = useState(false);
   const txns = useTransactions({ limit: RECENT_LIMIT });
+  const friends = useFriends();
 
   const items = txns.data?.items ?? [];
+
+  const nameByUserId = useMemo(() => {
+    const map: Record<string, string> = {};
+    if (user) {
+      map[user.user_id] = user.name;
+    }
+    for (const f of friends.data?.items ?? []) {
+      map[f.user_id] = f.name;
+    }
+    return map;
+  }, [friends.data, user]);
 
   return (
     <ScrollView className="flex-1 bg-neutral-50" contentContainerClassName="p-6">
@@ -59,6 +72,8 @@ export default function DashboardScreen() {
             <TransactionRow
               key={item.txn_id}
               item={item}
+              myUserId={user?.user_id ?? null}
+              nameByUserId={nameByUserId}
               onPress={() => router.push(`/transactions/${item.txn_id}`)}
             />
           ))}

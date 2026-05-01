@@ -5,6 +5,7 @@ import { Pressable, Text, TextInput, View } from 'react-native';
 import { zodResolver } from '@hookform/resolvers/zod';
 
 import { Button } from '~/components/ui/Button';
+import { DatePicker } from '~/components/ui/DatePicker';
 import { Sheet } from '~/components/ui/Sheet';
 import { toast } from '~/components/ui/Toaster';
 import { ApiErrorException } from '~/lib/api';
@@ -488,13 +489,11 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId, existing }
             control={control}
             name="txn_date"
             render={({ field }) => (
-              <TextInput
+              <DatePicker
                 testID="add-txn-date"
                 value={field.value}
-                onChangeText={field.onChange}
-                onBlur={field.onBlur}
-                placeholder="YYYY-MM-DD"
-                className="h-10 rounded-md border border-neutral-300 px-3 text-base text-neutral-900"
+                onChange={field.onChange}
+                max={todayIsoDate()}
               />
             )}
           />
@@ -734,6 +733,14 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId, existing }
       </View>
     </Sheet>
   );
+}
+
+function todayIsoDate(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function defaultValues(

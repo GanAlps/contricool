@@ -1,6 +1,7 @@
 import { Redirect, Stack, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, Text, View, useWindowDimensions } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '~/components/ui/Button';
 import { NavLink } from '~/components/ui/NavLink';
@@ -56,10 +57,16 @@ export default function AppLayout() {
 
   return (
     <View className="flex-1">
-      {/* Topbar + dropdown menu live in the same relative wrapper so
-          the absolute-positioned dropdown anchors to the topbar bottom
-          via `top-full`. */}
-      <View className="relative z-50">
+      {/* SafeAreaView pushes the topbar below the iPhone notch /
+          Dynamic Island / status bar (and below the Android cutout
+          where applicable). `edges={['top']}` only insets the top —
+          the bottom safe-area is handled per-screen so home-indicator
+          padding doesn't double up under nested ScrollViews.
+
+          Topbar + dropdown menu also share the relative-positioned
+          wrapper so the absolute-positioned dropdown anchors to the
+          topbar bottom via `top-full`. */}
+      <SafeAreaView edges={['top']} className="relative z-50 bg-white">
         <View
           testID="app-topbar"
           className="flex-row items-center justify-between border-b border-neutral-200 bg-white px-4 py-2"
@@ -134,7 +141,7 @@ export default function AppLayout() {
             </View>
           </View>
         ) : null}
-      </View>
+      </SafeAreaView>
 
       <Stack screenOptions={{ headerShown: false }} />
     </View>

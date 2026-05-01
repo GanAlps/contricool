@@ -57,6 +57,14 @@ export default defineConfig({
     alias: {
       '~': path.resolve(__dirname, '.'),
       'react-native': 'react-native-web',
+      // The package's `react-native` field points at `src/index.tsx`
+      // (untranspiled TS), which vitest's loader chokes on
+      // ("Unexpected token 'typeof'"). Force the ESM build instead so
+      // tests resolve to plain JS like Metro does on web.
+      'react-native-safe-area-context': path.resolve(
+        __dirname,
+        '../../node_modules/react-native-safe-area-context/lib/module/index.js',
+      ),
     },
     // Mirror Metro's platform-specific resolution so an extensionless
     // import of './auth-driver' picks up './auth-driver.web.ts' (the

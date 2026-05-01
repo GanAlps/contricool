@@ -2,6 +2,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { Stack } from 'expo-router';
 import { useEffect, useMemo } from 'react';
 import { View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ErrorBoundary, installGlobalErrorTelemetry } from '~/components/ErrorBoundary';
 import { Toaster } from '~/components/ui/Toaster';
@@ -31,10 +32,12 @@ export default function RootLayout() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <View className="flex-1">
-          <Stack screenOptions={{ headerShown: false }} />
-          <Toaster />
-        </View>
+        <SafeAreaProvider>
+          <View className="flex-1">
+            <Stack screenOptions={{ headerShown: false }} />
+            <Toaster />
+          </View>
+        </SafeAreaProvider>
       </QueryClientProvider>
     </ErrorBoundary>
   );
