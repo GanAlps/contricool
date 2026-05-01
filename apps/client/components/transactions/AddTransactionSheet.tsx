@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Pressable, Text, TextInput, View } from 'react-native';
 
 import { zodResolver } from '@hookform/resolvers/zod';
 
@@ -385,7 +385,7 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId, existing }
 
   return (
     <Sheet open={open} onClose={onClose} title="Add transaction" testID="add-txn-sheet">
-      <ScrollView className="max-h-[70vh]" contentContainerClassName="gap-4">
+      <View className="gap-4">
         {bannerMessage ? (
           <View
             testID="add-txn-banner"
@@ -731,7 +731,7 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId, existing }
             Add transaction
           </Button>
         </View>
-      </ScrollView>
+      </View>
     </Sheet>
   );
 }

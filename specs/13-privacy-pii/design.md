@@ -64,7 +64,7 @@ lookup_hash(email_or_phone, salt) = HMAC-SHA256(salt, normalize(email_or_phone))
 - If no match → write an `INVITE` row keyed by the hash so we can auto-link if the target signs up later.
 - Email/SMS may be sent to the actual identifier (one external signal that the recipient was invited; this is unavoidable since we deliver the invite by email or SMS).
 
-This blocks programmatic enumeration via the API. SMS/email delivery still confirms existence to whoever owns the inbox/phone — same as Splitwise; acceptable.
+This blocks programmatic enumeration via the API. SMS/email delivery still confirms existence to whoever owns the inbox/phone — standard for invite-by-identifier flows; acceptable.
 
 ## Account Deletion (the hardest privacy operation)
 

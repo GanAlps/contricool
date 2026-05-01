@@ -130,7 +130,7 @@ These fixtures are part of the test foundation, not per-test boilerplate.
 
 Detailed designs live in `specs/`. The architecture in one paragraph:
 
-ContriCool is a Splitwise-lite app. **One Expo codebase** under `apps/client` ships to web today (S3 + CloudFront) and iOS/Android tomorrow (EAS Build). **One Lambda** under `apps/api` runs FastAPI on Python 3.12 arm64 via the AWS Lambda Web Adapter, with SnapStart enabled. **Two DynamoDB tables** — `ContriCool-Users-<env>` (1 GSI: polymorphic email-hash + friendship reverse) and `ContriCool-Transactions-<env>` (1 GSI: user→txns). **Cognito User Pool** owns identity (email required + verified at MVP; phone is optional unverified metadata only). **One CloudFront distribution per env** routes `/v1/*` to API Gateway HTTP API, everything else to S3, all on the AWS-default `cloudfront.net` domain at MVP. Single AWS account in primary region us-west-2, two CDK stack groups (`Contricool-Dev-*`, `Contricool-Prod-*`) isolated by resource-name prefix, IAM scope, and tags.
+ContriCool is a lightweight expense-splitting app. **One Expo codebase** under `apps/client` ships to web today (S3 + CloudFront) and iOS/Android tomorrow (EAS Build). **One Lambda** under `apps/api` runs FastAPI on Python 3.12 arm64 via the AWS Lambda Web Adapter, with SnapStart enabled. **Two DynamoDB tables** — `ContriCool-Users-<env>` (1 GSI: polymorphic email-hash + friendship reverse) and `ContriCool-Transactions-<env>` (1 GSI: user→txns). **Cognito User Pool** owns identity (email required + verified at MVP; phone is optional unverified metadata only). **One CloudFront distribution per env** routes `/v1/*` to API Gateway HTTP API, everything else to S3, all on the AWS-default `cloudfront.net` domain at MVP. Single AWS account in primary region us-west-2, two CDK stack groups (`Contricool-Dev-*`, `Contricool-Prod-*`) isolated by resource-name prefix, IAM scope, and tags.
 
 **Read these designs in order if you're new:**
 
@@ -306,6 +306,6 @@ contricool/
 
 ## Appendix — Why these rules exist
 
-- **RED LINE 1** (no secrets/env data in source): The repo is public. Two contributors over four years on Splitwise's competitor leaked dev API URLs that turned into real attack vectors. We don't get to relearn that.
+- **RED LINE 1** (no secrets/env data in source): The repo is public. We've seen public repos in this space leak dev API URLs that turned into real attack vectors. We don't get to relearn that.
 - **RED LINE 2** (cost guardrails from day one): "We'll add the rate limit later" is how people wake up to a $4,000 SMS bill from one weekend of SMS pumping. The design has the limits; this rule enforces that they're in code, not on a TODO list.
 - **RED LINE 3** (negative tests): Auth bugs that pass positive tests are common. A test that asserts "Bob *can* read his own transaction" doesn't prove Bob *can't* read Alice's. Both must exist.

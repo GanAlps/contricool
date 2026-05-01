@@ -155,7 +155,7 @@ DDB supports up to 100 items per `TransactWriteItems` across multiple tables.
 | 5 | 4 | 1 + 5 + 1 = 7 | 11 |
 | 10 | 9 | 1 + 10 + 1 = 12 | 21 |
 
-**Member cap stays at 10 for MVP.** The 100-item TransactWriteItems limit gives us ample headroom (21 items used at the cap, 79 free) — but Splitwise-comparable group sizes aren't a stated MVP requirement, and 10-person groups cover dinners, trips, and house expenses. Raising the cap is a one-line change post-MVP if real demand for larger groups emerges.
+**Member cap stays at 10 for MVP.** The 100-item TransactWriteItems limit gives us ample headroom (21 items used at the cap, 79 free) — but large-group support isn't a stated MVP requirement, and 10-person groups cover dinners, trips, and house expenses. Raising the cap is a one-line change post-MVP if real demand for larger groups emerges.
 
 Atomicity is preserved end-to-end: any failed friendship check or item write aborts the whole transaction.
 

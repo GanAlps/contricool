@@ -65,7 +65,7 @@ let installed = false;
  * Mounted from `app/_layout.tsx` once at bootstrap.
  */
 export function installGlobalErrorTelemetry(): void {
-  if (installed || typeof window === 'undefined') {
+  if (installed || typeof window === 'undefined' || typeof window.addEventListener !== 'function') {
     return;
   }
   installed = true;

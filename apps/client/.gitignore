@@ -4,3 +4,9 @@
 
 expo-env.d.ts
 # @end expo-cli
+
+# EAS local-build artifacts (APK / AAB) drop here; never commit binaries.
+build-*.apk
+build-*.aab
+*.apk
+*.aab
