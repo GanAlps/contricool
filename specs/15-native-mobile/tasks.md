@@ -46,22 +46,24 @@ Goal: Auth-correct, observable native dev build for Android and iOS that connect
 - [ ] Export both a regex matcher and a deep-clone-and-redact helper.
 - [ ] **Tests:** every denylist key produces a redacted output for nested objects, arrays, and headers.
 
-### 8a.6 — Sentry integration
-- [ ] Add `sentry-expo` (or `@sentry/react-native` directly via Expo plugin) to `package.json`.
-- [ ] Add the Sentry plugin to `app.json` `plugins`.
-- [ ] Create `apps/client/lib/sentry.ts` with `init({ beforeSend: scrubber })` reading DSN from `process.env.EXPO_PUBLIC_SENTRY_DSN`.
-- [ ] Wire `Sentry.init()` at the top of `apps/client/app/_layout.tsx`, before any other module imports.
-- [ ] Configure `release` and `dist` tags from `expo-constants` + git SHA injected at build time.
-- [ ] EAS post-build hook: source-map upload via Sentry CLI; build fails non-zero on upload failure.
-- [ ] **Tests** (`apps/client/__tests__/lib/sentry.test.ts`):
-  - `beforeSend` scrubs each PII denylist key.
-  - DSN absent → init is a no-op (doesn't crash).
-  - release tag format is `<version>+<sha7>`.
+### 8a.6 — Sentry integration ✅
+- [x] Add `@sentry/react-native ~6.5.0` to `package.json` (Expo SDK 52 compatible).
+- [x] Add `"@sentry/react-native"` to `app.json` `plugins` (config plugin patches Android Gradle + iOS Podfile during EAS Build).
+- [x] Create `apps/client/lib/sentry.web.ts` (no-op stub) and `apps/client/lib/sentry.native.ts` with `Sentry.init({ beforeSend: scrubEvent, sendDefaultPii: false })` reading DSN from `process.env.EXPO_PUBLIC_SENTRY_DSN`. Metro picks the right module per platform via suffix resolution; the split keeps `@sentry/react-native` out of the web bundle entirely.
+- [x] Wire `initSentry()` at module scope in `apps/client/app/_layout.tsx` (before React mounts).
+- [x] Configure `release` (`EXPO_PUBLIC_RELEASE`) and `dist` (`EXPO_PUBLIC_DIST`) tags via env vars injected by EAS Build at bundle time. Both default to undefined → Sentry uses its own release auto-detection.
+- [ ] EAS post-build hook: source-map upload via Sentry CLI; build fails non-zero on upload failure. **Deferred to Phase 8b** — first `eas build` won't run until Android profile lands.
+- [x] **Tests** (`apps/client/__tests__/lib/sentry.{web,native}.test.ts`, 24 tests):
+  - `beforeSend` scrubs each PII denylist key across `extra`, `tags`, `contexts`, `request`, `breadcrumbs`, and strips `email`/`username` from `event.user`.
+  - DSN absent → `initSentry()` is a no-op AND subsequent `captureError`/`captureMetric` calls short-circuit (no SDK calls when not initialized).
+  - Idempotent — calling `initSentry()` twice initializes once.
+  - Web stub never throws (compiles + runs in jsdom without native modules).
 
-### 8a.7 — Telemetry split
-- [ ] Rename existing `apps/client/lib/telemetry.ts` to `telemetry.web.ts` (or factor out shared bits and create per-platform suffixes).
-- [ ] Create `apps/client/lib/telemetry.native.ts` that forwards to Sentry instead of `/v1/telemetry/error`.
-- [ ] Verify Metro picks the right one for each bundle.
+### 8a.7 — Telemetry split ✅
+- [x] Renamed `apps/client/lib/telemetry.ts` → `telemetry.web.ts` (existing `/v1/telemetry/error` POST flow).
+- [x] Created `apps/client/lib/telemetry.native.ts` that forwards to Sentry via `~/lib/sentry`. Same surface (`postTelemetry`, `reportError`, `reportMetric`, `_resetTelemetryForTests`) and same 200 ms dedup window so call sites (ErrorBoundary, web-vitals) work unchanged.
+- [x] Metro suffix resolution: vitest config (`extensions: ['.web.ts', ...]`) + tsconfig `moduleSuffixes: [".web", ""]` mirror the runtime resolver. No fallback `lib/telemetry.ts` exists, so neither bundle can leak the wrong impl.
+- [x] **Tests** (`apps/client/__tests__/lib/telemetry.native.test.ts`, 12 tests): Sentry module mocked at `~/lib/sentry`; covers error→`captureError` reconstruction, metric forwarding, dedup window, swallowed Sentry errors, `reportError` extraction (Error/string/non-Error).
 
 ### 8a.8 — Phase 8a verification
 - [ ] `pnpm --filter @contricool/client lint && pnpm --filter @contricool/client typecheck && pnpm --filter @contricool/client test:coverage` all green at thresholds.

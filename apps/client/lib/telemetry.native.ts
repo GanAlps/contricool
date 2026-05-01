@@ -21,7 +21,7 @@
  * a tight error loop from hammering the wire.
  */
 
-import { captureError, captureMetric } from './sentry';
+import { captureError, captureMetric } from '~/lib/sentry';
 
 type TelemetryLevel = 'error' | 'metric';
 

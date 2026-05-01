@@ -47,9 +47,29 @@ function getEnvironment(): string {
 
 /**
  * Best-effort PII scrubber for Sentry events. Runs in `beforeSend` so
- * it intercepts the event between capture and network send. Errors
- * inside the scrubber must never throw — Sentry would drop the event
- * AND we'd lose the original error context.
+ * it intercepts the event between capture and network send.
+ *
+ * Known gaps (accepted trade-offs for RED LINE 1 audit clarity — see
+ * the design doc and future hardening tasks if these become real):
+ *
+ *  1. **Fails open on internal errors.** If the scrubber itself throws
+ *     (circular references, exotic prototypes, malformed payload), the
+ *     catch returns the event as-is rather than dropping it. Rationale:
+ *     a dropped event is invisible debt — we'd lose error visibility
+ *     entirely. An unscrubbed event is visible debt — it'll show up
+ *     in Sentry where we can spot it. Visible > invisible at MVP.
+ *
+ *  2. **`exception.values[].value` is NOT scrubbed.** Error message
+ *     text frequently carries user input (a thrown
+ *     `Error(\`bad email \${email}\`)` would leak the email). The
+ *     denylist is a key-name walker, not a free-text scanner, so we
+ *     can't easily redact inside string values. The mitigation is
+ *     code review + a no-PII-in-error-messages convention, not the
+ *     scrubber. Sentry's own `defaultIntegrations` does some pattern
+ *     scrubbing; we rely on that as the second line.
+ *
+ *  3. **Breadcrumb `message` and `category` strings** follow the same
+ *     pattern as (2) — only `data` is structured.
  */
 export function scrubEvent<E extends Sentry.Event>(event: E): E {
   try {
