@@ -1,18 +1,60 @@
 # Runbook — Android Sideload (Phase 8b)
 
-**Audience:** the developer (you, AFK or back at desk) shipping a debug build of ContriCool to a personal Android device. No Play Store account, no Fastlane, no CI/CD for native artifacts at v1 — manual end-to-end.
+**Audience:** the developer (you) shipping a debug/preview build of ContriCool to a personal Android device. No Play Store, no Fastlane, no CI/CD for native artifacts at v1 — manual end-to-end.
 
-**Distribution model:** sideload-only. Each build is downloaded as an APK from EAS, then installed via `adb install -r`. Replacing an installed APK with `-r` keeps existing data; uninstalling first wipes secure storage including the saved refresh token.
+**Distribution model:** sideload-only. APK installed via `adb install -r`. Replacing an installed APK with `-r` keeps existing data; uninstalling first wipes secure storage including the saved refresh token.
 
 ---
 
-## One-time setup (already done; re-do if a teammate joins)
+## Cloud vs local — choose your build mode
 
-1. **Expo / EAS account.** Free tier is fine for personal sideload. Run `pnpm dlx eas-cli@latest login` once on the dev machine. Stored in `~/.expo/state.json`.
+EAS Build offers two modes:
 
-2. **EAS project init.** `eas init` (one-time per repo) mints a project ID, which goes into `apps/client/app.json` under `extra.eas.projectId`. **Do not commit the project ID if it ties to a personal account** — EAS treats it as semi-public, but per RED LINE 1 it's safer to inject via env var at build time. Until we have an org account, accept the personal-project ID being committed and rotate when transferring to an org.
+| Mode | Command | Cost | Time | Use when |
+|---|---|---|---|---|
+| **Local** (default for personal testing) | `pnpm dlx eas-cli build --profile preview --platform android --local` | Free, no quota | ~8–12 min on M-series Mac / decent Linux box | All day-to-day development and personal sideload smoke testing |
+| **Cloud** | `pnpm dlx eas-cli build --profile preview --platform android` (no `--local`) | **Burns 1 of 15 free builds/month** | ~10–15 min | Only when you need a build that's reproducible in CI, sharing the artifact with someone who doesn't have the repo, or producing a "release candidate" from a clean environment |
 
-3. **Android adb.** Install `android-tools` (Linux: `apt install android-tools`; macOS: `brew install android-platform-tools`). Verify: `adb devices` shows your device when plugged in (after enabling USB debugging in Developer Options).
+**Default to `--local`.** The 15 cloud-build/month quota on the free Expo plan should be reserved for builds you're actually going to ship to TestFlight-equivalent / production. Burning a cloud build for "did the splash screen change render correctly" is wasteful — that build runs identically on your machine in the same wall-clock time.
+
+The npm scripts in `apps/client/package.json` codify this:
+
+```bash
+pnpm build:android        # local APK build (preferred)
+pnpm build:android:cloud  # cloud build (uses your monthly quota)
+```
+
+**iOS is local-only.** `eas build --local` is the only viable path on a free Apple Developer account (cloud signing requires the paid Developer Program). See `sideload-ios-personal-team.md`.
+
+---
+
+## One-time setup (do this once per machine)
+
+1. **Expo / EAS account.** Free tier is fine. Run `pnpm dlx eas-cli@latest login` once. Stored in `~/.expo/state.json`. Required even for `--local` builds because EAS-CLI still talks to the project metadata.
+
+2. **EAS project init.** `eas init` mints a project ID into `apps/client/app.json` under `extra.eas.projectId`. EAS treats it as semi-public; per RED LINE 1 the safer pattern is env-var injection, but for a personal sideload the committed UUID is acceptable and easy to rotate when transferring to an org.
+
+3. **Android `adb`.** Install platform-tools so `adb devices` shows your phone when plugged in:
+   - Linux: `apt install android-tools`
+   - macOS: `brew install android-platform-tools`
+   Then on the phone: enable Developer Options → USB Debugging.
+
+4. **Local Android toolchain (only needed for `--local` builds).** EAS's local mode reuses the same Gradle pipeline the cloud uses, so it needs:
+   - **JDK 17** (Temurin recommended): `brew install --cask temurin@17` on macOS, or `apt install openjdk-17-jdk` on Linux. Verify: `java -version` shows 17.x.
+   - **Android command-line tools** OR **Android Studio**:
+     - macOS: `brew install --cask android-commandlinetools` then accept SDK licenses with `sdkmanager --licenses`
+     - Linux: download from `https://developer.android.com/studio#command-tools` and unzip to `~/Android/cmdline-tools/latest/`
+   - **`ANDROID_HOME` env var** pointing at the SDK root (`~/Library/Android/sdk` on macOS via Studio, or `~/Android/Sdk` on Linux). Add to `.zshrc` / `.bashrc`:
+     ```bash
+     export ANDROID_HOME="$HOME/Library/Android/sdk"   # macOS path; adjust for Linux
+     export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+     ```
+   - **Required SDK packages** (one-time, idempotent):
+     ```bash
+     sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+     ```
+
+   First `--local` build downloads ~3 GB of Gradle dependencies (slow, one-time); subsequent builds reuse the cache and finish in 5–8 min.
 
 ---
 
@@ -20,24 +62,47 @@
 
 ### 1. Build the APK
 
+**Local (default):**
+
 ```bash
 cd apps/client
-pnpm dlx eas-cli build --profile preview --platform android
+pnpm build:android
+# equivalent: pnpm dlx eas-cli build --profile preview --platform android --local
 ```
 
-This kicks off a cloud build. Watch progress in the terminal or at `https://expo.dev/accounts/<your-account>/projects/contricool/builds`. Typical wall-clock: **~10–15 min**.
+The build runs in this terminal, prints Gradle output, and on success drops a `.apk` in the current directory (filename like `build-1234567890123.apk`). No EAS quota burned.
 
-The `preview` profile in `apps/client/eas.json`:
-- builds an APK (not AAB — APK is what `adb install` accepts)
-- uses `:app:assembleRelease` Gradle task
-- bundles the **dev** API base URL (override via `--env-file` if shipping a build pointed at prod)
-
-### 2. Download and install
-
-When the build finishes, EAS prints a download URL. Either:
+**Cloud (only when needed):**
 
 ```bash
-# Option A: let the CLI install it for you (asks before installing)
+pnpm build:android:cloud
+# equivalent: pnpm dlx eas-cli build --profile preview --platform android
+```
+
+Watch progress at `https://expo.dev/accounts/<your-account>/projects/contricool/builds`. Wall-clock ~10–15 min. **Burns 1 of 15 free builds for the month** — see the cap at the top of the EAS dashboard before running.
+
+### Profile reference (`apps/client/eas.json`)
+
+The `preview` profile:
+- `buildType: "apk"` (not AAB — APK is what `adb install` accepts)
+- `gradleCommand: ":app:assembleRelease"`
+- `resourceClass: "medium"` (free-tier compatible; large requires a paid Expo plan)
+- bundles the **dev** API base URL (override via `--env-file <path>` if shipping a build pointed at prod)
+
+### 2. Install on the device
+
+**After a local build:** the APK is in `apps/client/` (filename `build-<timestamp>.apk`). Install directly:
+
+```bash
+adb install -r apps/client/build-*.apk
+# or — if multiple builds accumulated, pick the newest:
+adb install -r "$(ls -t apps/client/build-*.apk | head -1)"
+```
+
+**After a cloud build:** EAS prints a download URL when the build finishes. Either let the CLI install it, or download manually:
+
+```bash
+# Option A: CLI auto-install (prompts before installing)
 pnpm dlx eas-cli build:run -p android
 
 # Option B: download and install manually
@@ -45,7 +110,7 @@ curl -L "https://expo.dev/artifacts/.../build.apk" -o /tmp/contricool.apk
 adb install -r /tmp/contricool.apk
 ```
 
-`-r` replaces the existing install. Without `-r`, adb refuses if the package is already installed.
+`-r` replaces the existing install. Without `-r`, adb refuses if the package is already installed. **Don't uninstall first** — that wipes secure-storage including the saved refresh token, forcing a re-login on next launch (annoying, not data loss).
 
 ### 3. Smoke checklist (the same one you run on web before tagging a release)
 

@@ -30,12 +30,13 @@ This keeps you on the cloud build pipeline (consistent with Android) but produce
 
 ```bash
 cd apps/client
-pnpm dlx eas-cli build --profile preview --platform ios --local
+pnpm build:ios
+# equivalent: pnpm dlx eas-cli build --profile preview --platform ios --local
 ```
 
 **Use `--profile preview`, NOT `development`**, for sideload. The `development` profile in `eas.json` has `simulator: true` — it builds a Simulator-only artifact (x86_64 / arm64-simulator slice) that **cannot install on a physical iPhone** and Xcode's drag-drop will fail with a cryptic architecture error. The `preview` profile has `simulator: false` and produces a device-deployable `.ipa`.
 
-`--local` runs the build on your Mac instead of EAS Cloud, which is required for free Apple-ID signing (EAS Cloud doesn't accept personal-team profiles for cloud signing). Output: an `.ipa` archive. Wall-clock: **~15–20 min** on an M-series Mac.
+`--local` runs the build on your Mac instead of EAS Cloud, which is required for free Apple-ID signing (EAS Cloud doesn't accept personal-team profiles for cloud signing). It also doesn't burn the 15-build/month quota on the free Expo plan. Output: an `.ipa` archive. Wall-clock: **~15–20 min** on an M-series Mac.
 
 If you specifically want a Simulator build for desktop testing (no iPhone in hand), keep the `development` profile and install the `.app` via `xcrun simctl install booted <path>` instead.
 
