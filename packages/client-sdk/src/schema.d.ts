@@ -1064,6 +1064,14 @@ export interface components {
          *     dashboard summary can compute ``net = paid - owed`` per transaction
          *     without an extra round-trip to read META payers. ``my_paid_amount``
          *     is the requester's slot in ``meta.payers`` (0.00 if they didn't pay).
+         *
+         *     ``payer_user_ids`` lists every payer's user_id (deduplicated, in the
+         *     server-canonical order from ``meta.payers``) so the client can
+         *     render "Paid by <name>" / "Paid by Multiple" without a follow-up
+         *     GET on each row. We surface user_ids only — name resolution
+         *     happens client-side via the cached friend list + the auth user, so
+         *     no extra backend call or PII surface beyond what the friend list
+         *     already exposes.
          */
         TransactionListItem: {
             /** Amount */
@@ -1086,6 +1094,8 @@ export interface components {
             my_paid_amount: string;
             /** Name */
             name: string;
+            /** Payer User Ids */
+            payer_user_ids: string[];
             /**
              * Split Method
              * @enum {string}

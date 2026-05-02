@@ -1,5 +1,13 @@
 import type { ReactNode } from 'react';
-import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export type SheetProps = {
@@ -38,25 +46,30 @@ export function Sheet({ open, onClose, title, children, testID }: SheetProps) {
       testID={testID ?? 'sheet'}
     >
       <SafeAreaView className="flex-1 bg-white" edges={['top', 'bottom']}>
-        <View className="flex-row items-center justify-between border-b border-neutral-200 px-4 py-3">
-          <Text className="text-lg font-semibold text-neutral-900">{title ?? ''}</Text>
-          <Pressable
-            accessibilityLabel="Close dialog"
-            accessibilityRole="button"
-            onPress={onClose}
-            testID={testID ? `${testID}-close` : 'sheet-close'}
-            className="rounded-md px-3 py-1 active:bg-neutral-100"
-          >
-            <Text className="text-2xl text-neutral-700">×</Text>
-          </Pressable>
-        </View>
-        <ScrollView
-          className="flex-1"
-          contentContainerClassName="p-4"
-          keyboardShouldPersistTaps="handled"
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-          {children}
-        </ScrollView>
+          <View className="flex-row items-center justify-between border-b border-neutral-200 px-4 py-3">
+            <Text className="text-lg font-semibold text-neutral-900">{title ?? ''}</Text>
+            <Pressable
+              accessibilityLabel="Close dialog"
+              accessibilityRole="button"
+              onPress={onClose}
+              testID={testID ? `${testID}-close` : 'sheet-close'}
+              className="rounded-md px-3 py-1 active:bg-neutral-100"
+            >
+              <Text className="text-2xl text-neutral-700">×</Text>
+            </Pressable>
+          </View>
+          <ScrollView
+            className="flex-1"
+            contentContainerClassName="p-4"
+            keyboardShouldPersistTaps="handled"
+          >
+            {children}
+          </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     </Modal>
   );

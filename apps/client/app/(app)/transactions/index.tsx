@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 
 import { AddTransactionSheet } from '~/components/transactions/AddTransactionSheet';
@@ -7,6 +7,7 @@ import { TransactionRow } from '~/components/transactions/TransactionRow';
 import { Button } from '~/components/ui/Button';
 import { Card } from '~/components/ui/Card';
 import { Spinner } from '~/components/ui/Spinner';
+import { useAuthStore } from '~/lib/auth-store';
 import { useFriends } from '~/lib/queries/friends';
 import { useTransactions } from '~/lib/queries/transactions';
 
@@ -18,6 +19,7 @@ export default function TransactionsListScreen() {
   const friendId = typeof params.friend_id === 'string' ? params.friend_id : null;
 
   const friends = useFriends();
+  const me = useAuthStore((s) => s.user);
   const [addOpen, setAddOpen] = useState(false);
   const txns = useTransactions({
     limit: PAGE_LIMIT,
@@ -25,6 +27,17 @@ export default function TransactionsListScreen() {
   });
 
   const friend = friendId ? friends.data?.items.find((f) => f.user_id === friendId) : null;
+
+  const nameByUserId = useMemo(() => {
+    const map: Record<string, string> = {};
+    if (me) {
+      map[me.user_id] = me.name;
+    }
+    for (const f of friends.data?.items ?? []) {
+      map[f.user_id] = f.name;
+    }
+    return map;
+  }, [friends.data, me]);
 
   return (
     <ScrollView className="flex-1 bg-neutral-50" contentContainerClassName="p-6">
@@ -83,6 +96,8 @@ export default function TransactionsListScreen() {
             <TransactionRow
               key={item.txn_id}
               item={item}
+              myUserId={me?.user_id ?? null}
+              nameByUserId={nameByUserId}
               onPress={() => router.push(`/transactions/${item.txn_id}`)}
             />
           ))}

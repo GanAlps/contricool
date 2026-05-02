@@ -20,7 +20,8 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.contricool.app"
+      "bundleIdentifier": "com.contricool.app",
+      "buildNumber": "1"
     },
     "android": {
       "package": "com.contricool.app",
@@ -44,7 +45,8 @@
             }
           }
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true

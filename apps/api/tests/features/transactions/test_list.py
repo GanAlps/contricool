@@ -177,6 +177,46 @@ def test_list_carries_my_paid_and_owed_amounts(
     a_paid = items["A-paid"]
     assert a_paid["my_paid_amount"] == "10.00"
     assert a_paid["my_owed_amount"] == "5.00"
+    # Single-payer row carries exactly that one user_id so the client
+    # can render "Paid by <name>" without a per-row GET.
+    assert a_paid["payer_user_ids"] == [A]
     b_paid = items["B-paid"]
     assert b_paid["my_paid_amount"] == "0.00"
+    assert b_paid["payer_user_ids"] == [B]
     assert b_paid["my_owed_amount"] == "10.00"
+
+
+def test_list_carries_payer_user_ids_for_multi_payer(
+    txn_env: dict[str, object], txn_client: TestClient
+) -> None:
+    """A transaction with multiple payers should surface every payer's
+    user_id (deduplicated) so the client can render "Paid by Multiple"
+    or list each payer without a follow-up GET on each row."""
+    _seed(txn_env)
+    body = {
+        "name": "Multi-payer dinner",
+        "type": "expense",
+        "amount": "30.00",
+        "currency": "USD",
+        "txn_date": "2026-04-29",
+        "split_method": "equal",
+        "members": [{"user_id": A}, {"user_id": B}, {"user_id": C}],
+        "payers": [
+            {"user_id": A, "paid_amount": "10.00"},
+            {"user_id": B, "paid_amount": "20.00"},
+        ],
+    }
+    resp = txn_client.post(
+        "/v1/transactions",
+        json=body,
+        headers={**auth_headers_for(A, "a@x.com"), "Idempotency-Key": "multi-payer"},
+    )
+    assert resp.status_code == 201, resp.text
+
+    resp = txn_client.get("/v1/transactions", headers=auth_headers_for(A))
+    assert resp.status_code == 200
+    item = next(it for it in resp.json()["items"] if it["name"] == "Multi-payer dinner")
+    assert sorted(item["payer_user_ids"]) == sorted([A, B])
+    # Order is server-canonical (sorted by user_id ascending in the
+    # writer); A < B in the ULID alphabet for these fixtures.
+    assert item["payer_user_ids"] == [A, B]

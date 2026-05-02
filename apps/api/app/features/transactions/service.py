@@ -531,6 +531,17 @@ def list_transactions(
             ),
             Decimal("0.00"),
         )
+        # Dedup payer ids while preserving the server-canonical order
+        # (`meta.payers` is sorted by user_id ascending in the writer
+        # path, so the client can rely on a stable order for "Paid by
+        # X & Y" rendering).
+        seen_payers: set[str] = set()
+        payer_user_ids: list[str] = []
+        for p in meta.payers:
+            uid = str(p["user_id"])
+            if uid not in seen_payers:
+                seen_payers.add(uid)
+                payer_user_ids.append(uid)
         from datetime import date as _date
 
         items.append(
@@ -545,6 +556,7 @@ def list_transactions(
                 creator_id=meta.creator_id,
                 my_owed_amount=my_owed,
                 my_paid_amount=my_paid,
+                payer_user_ids=payer_user_ids,
                 created_at=datetime.fromisoformat(
                     meta.created_at.replace("Z", "+00:00")
                 ),

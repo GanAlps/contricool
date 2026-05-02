@@ -10,6 +10,7 @@ import { Sheet } from '~/components/ui/Sheet';
 import { Spinner } from '~/components/ui/Spinner';
 import { toast } from '~/components/ui/Toaster';
 import { ApiErrorException } from '~/lib/api';
+import { useAuthStore } from '~/lib/auth-store';
 import { useFriendBalance, useFriends, useRemoveFriend } from '~/lib/queries/friends';
 import { useTransactions } from '~/lib/queries/transactions';
 import type { FriendItem } from '~/lib/types';
@@ -24,6 +25,7 @@ export default function FriendDetailScreen() {
   const userId = typeof params.userId === 'string' ? params.userId : '';
 
   const friendsList = useFriends();
+  const me = useAuthStore((s) => s.user);
   const balance = useFriendBalance(userId);
   const txns = useTransactions({ limit: 20, friend_id: userId });
   const remove = useRemoveFriend();
@@ -34,6 +36,17 @@ export default function FriendDetailScreen() {
     () => friendsList.data?.items.find((f) => f.user_id === userId),
     [friendsList.data, userId],
   );
+
+  const nameByUserId = useMemo(() => {
+    const map: Record<string, string> = {};
+    if (me) {
+      map[me.user_id] = me.name;
+    }
+    for (const f of friendsList.data?.items ?? []) {
+      map[f.user_id] = f.name;
+    }
+    return map;
+  }, [friendsList.data, me]);
 
   const balanceErr = balance.error instanceof ApiErrorException ? balance.error.error : null;
   if (balanceErr?.code === 'USER_NOT_FOUND') {
@@ -112,6 +125,8 @@ export default function FriendDetailScreen() {
             <TransactionRow
               key={item.txn_id}
               item={item}
+              myUserId={me?.user_id ?? null}
+              nameByUserId={nameByUserId}
               onPress={() => router.push(`/transactions/${item.txn_id}`)}
             />
           ))}

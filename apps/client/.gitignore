@@ -10,3 +10,8 @@ build-*.apk
 build-*.aab
 *.apk
 *.aab
+
+# Prebuild output — Expo managed workflow regenerates these from app.json
+# on each build; the canonical source of truth is app.json + plugins.
+ios/
+android/
