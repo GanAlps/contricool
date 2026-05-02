@@ -17,13 +17,18 @@ export type DatePickerProps = {
 /**
  * Native DatePicker — opens the platform-native picker on tap.
  *
- * iOS shows the spinner inline once `setShow(true)` is called and
- * fires `onChange` for every spin (we keep the `selected` Date in
- * memory and commit when the user taps Done — the picker auto-closes
- * via `display="default"` which uses the iOS 14+ compact / wheel
- * UI). Android pops a one-shot dialog (`DialogAndroid`); the picker
- * dismisses itself on confirm or cancel and `onChange` fires with
- * `event.type === 'set'` (confirm) or `'dismissed'` (cancel).
+ * iOS uses `display="inline"` (always-visible embedded wheel that
+ * lives next to the trigger). Each spin fires `onChange` with
+ * `event.type === 'set'`, so the row commits incrementally as the
+ * user spins; the picker doesn't have its own dismiss button —
+ * closing the surrounding Sheet is the dismiss path. Intentional
+ * UX trade-off: simpler than juggling a separate "Done" button.
+ *
+ * Android uses `display="default"` which pops a one-shot dialog
+ * (`DialogAndroid`). The picker dismisses itself on confirm or
+ * cancel and `onChange` fires with `event.type === 'set'`
+ * (confirm) or `'dismissed'` (cancel) — we collapse the modal in
+ * both cases to match Android UX expectations.
  */
 export function DatePicker({ value, onChange, max, min, testID }: DatePickerProps) {
   const [show, setShow] = useState(false);

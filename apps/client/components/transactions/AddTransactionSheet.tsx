@@ -78,10 +78,6 @@ function pickValidationIssue(e: ApiError): string {
   return first?.issue ?? 'Invalid input.';
 }
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 function newIdempotencyKey(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -493,7 +489,7 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId, existing }
                 testID="add-txn-date"
                 value={field.value}
                 onChange={field.onChange}
-                max={todayIsoDate()}
+                max={todayIso()}
               />
             )}
           />
@@ -735,7 +731,17 @@ export function AddTransactionSheet({ open, onClose, prefillFriendId, existing }
   );
 }
 
-function todayIsoDate(): string {
+/**
+ * "Today" in the user's local timezone, formatted as `YYYY-MM-DD`.
+ *
+ * `new Date().toISOString().slice(0, 10)` was previously used here
+ * but returns UTC, which after midnight UTC for a user in a negative
+ * offset is a day ahead of the user's wall clock. The form default
+ * and the DatePicker `max` need to agree (otherwise the picker
+ * clamps and the backend rejects with `INVALID_DATE`), so both go
+ * through this single helper.
+ */
+function todayIso(): string {
   const d = new Date();
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
